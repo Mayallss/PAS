@@ -1,0 +1,408 @@
+// PAS Platform — core schema (Phase 1: identity, organization, customer, time-report, portal, audit).
+// Mapping from the legacy MySQL schema: docs/04-migration-strategy.md §3
+//
+// Flexibility principles (docs/05 §4):
+//  - Strict relational core with FKs and constraints.
+//  - Effective-dated rows for anything that changes over time (schedules, cost rates) so history stays correct.
+//  - Business configuration lives in tables (roles, schedules, categories, apps), not in code.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum EmploymentStatus {
+  ACTIVE
+  INACTIVE
+}
+
+/// Legacy job_table.job_ac_group: 1=JOB, 2=PAS, 3=Meet, 4=Leave
+enum WorkCategoryType {
+  CLIENT_WORK
+  INTERNAL
+  MEETING
+  LEAVE
+}
+
+/// SUBMITTED/APPROVED/REJECTED are reserved for the approval workflow (docs/06 Q1) and not used yet.
+enum TimeEntryStatus {
+  DRAFT
+  SUBMITTED
+  APPROVED
+  REJECTED
+  MIGRATED
+}
+
+/// Unit of a cost rate — pending docs/06 Q5 (legacy code used both).
+enum RateUnit {
+  HOUR
+  DAY
+}
+
+enum AppKind {
+  INTERNAL //  module of this platform
+  EXTERNAL //  link to another system (monday.com, forms, …)
+  PLANNED //   future module, shown as "coming soon"
+}
+
+// ---------------------------------------------------------------------------
+// Organization & identity
+// ---------------------------------------------------------------------------
+
+model OrgUnit {
+  id          String               @id @default(uuid()) @db.Uuid
+  name        String
+  parentId    String?              @map("parent_id") @db.Uuid
+  parent      OrgUnit?             @relation("OrgUnitTree", fields: [parentId], references: [id])
+  children    OrgUnit[]            @relation("OrgUnitTree")
+  managerId   String?              @map("manager_id") @db.Uuid
+  manager     Employee?            @relation("OrgUnitManager", fields: [managerId], references: [id])
+  members     Employee[]           @relation("OrgUnitMembers")
+  roleScopes  RoleAssignment[]
+  schedules   ScheduleAssignment[]
+  legacyId    Int?                 @unique @map("legacy_id")
+
+  @@map("org_unit")
+}
+
+model EmployeeLevel {
+  id        String     @id @default(uuid()) @db.Uuid
+  code      String     @unique
+  name      String
+  sortOrder Int        @default(0) @map("sort_order")
+  employees Employee[]
+  costRates CostRate[]
+  legacyId  Int?       @unique @map("legacy_id")
+
+  @@map("employee_level")
+}
+
+/// Cost/charge rate per level with an effective period, so raising a rate never rewrites past costs.
+model CostRate {
+  id            String        @id @default(uuid()) @db.Uuid
+  levelId       String        @map("level_id") @db.Uuid
+  level         EmployeeLevel @relation(fields: [levelId], references: [id])
+  amount        Decimal       @db.Decimal(12, 2)
+  unit          RateUnit
+  effectiveFrom DateTime      @map("effective_from") @db.Date
+  effectiveTo   DateTime?     @map("effective_to") @db.Date
+
+  // No two overlapping periods per level: exclusion constraint in migration SQL.
+  @@index([levelId, effectiveFrom])
+  @@map("cost_rate")
+}
+
+model Employee {
+  id             String           @id @default(uuid()) @db.Uuid
+  fullName       String           @map("full_name")
+  nickname       String?
+  /// Must match the organisation IdP e-mail (OIDC `email` claim).
+  email          String?          @unique
+  /// OIDC `sub`, bound on first successful SSO login.
+  oidcSubject    String?          @unique @map("oidc_subject")
+  status         EmploymentStatus @default(ACTIVE)
+  startDate      DateTime?        @map("start_date") @db.Date
+  orgUnitId      String?          @map("org_unit_id") @db.Uuid
+  orgUnit        OrgUnit?         @relation("OrgUnitMembers", fields: [orgUnitId], references: [id])
+  levelId        String?          @map("level_id") @db.Uuid
+  level          EmployeeLevel?   @relation(fields: [levelId], references: [id])
+  legacyId       Int?             @unique @map("legacy_id")
+  createdAt      DateTime         @default(now()) @map("created_at")
+  updatedAt      DateTime         @updatedAt @map("updated_at")
+
+  roleAssignments RoleAssignment[]
+  schedules       ScheduleAssignment[]
+  managedUnits    OrgUnit[]        @relation("OrgUnitManager")
+  ownedCustomers  Customer[]       @relation("CustomerOwner")
+  managedEngagements Engagement[]  @relation("EngagementManager")
+  timeEntries     TimeEntry[]      @relation("EntryOwner")
+  sessions        Session[]
+  announcements   Announcement[]
+  acknowledgements AnnouncementAck[]
+
+  @@map("employee")
+}
+
+/// A named bundle of permissions. Permission keys are defined in code (apps/api/.../permissions.ts);
+/// which role gets which permission is data, editable by admins.
+model Role {
+  id          String           @id @default(uuid()) @db.Uuid
+  key         String           @unique
+  name        String
+  description String?
+  permissions String[]
+  /// System roles cannot be deleted (the platform relies on them existing).
+  isSystem    Boolean          @default(false) @map("is_system")
+  assignments RoleAssignment[]
+
+  @@map("role")
+}
+
+/// Role granted to an employee, optionally limited to an org unit (and its sub-units).
+/// Unscoped = applies company-wide (for report permissions) / to own team (manager fallback).
+model RoleAssignment {
+  id         String   @id @default(uuid()) @db.Uuid
+  employeeId String   @map("employee_id") @db.Uuid
+  employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  roleId     String   @map("role_id") @db.Uuid
+  role       Role     @relation(fields: [roleId], references: [id])
+  orgUnitId  String?  @map("org_unit_id") @db.Uuid
+  orgUnit    OrgUnit? @relation(fields: [orgUnitId], references: [id])
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  // Unique (employee, role, org_unit) with NULLS NOT DISTINCT: in migration SQL.
+  @@index([employeeId])
+  @@map("role_assignment")
+}
+
+model Session {
+  /// SHA-256 of the opaque cookie token; the raw token is never stored.
+  id         String   @id
+  employeeId String   @map("employee_id") @db.Uuid
+  employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  csrfToken  String   @map("csrf_token")
+  createdAt  DateTime @default(now()) @map("created_at")
+  expiresAt  DateTime @map("expires_at")
+  lastSeenAt DateTime @default(now()) @map("last_seen_at")
+  ip         String?
+  userAgent  String?  @map("user_agent")
+
+  @@index([employeeId])
+  @@map("session")
+}
+
+// ---------------------------------------------------------------------------
+// Work schedules (replaces the single company-wide "540 minutes per day")
+// ---------------------------------------------------------------------------
+
+/// Minutes expected per ISO weekday (index 0 = Monday … 6 = Sunday).
+model WorkSchedule {
+  id              String               @id @default(uuid()) @db.Uuid
+  name            String               @unique
+  weekdayMinutes  Int[]                @map("weekday_minutes")
+  assignments     ScheduleAssignment[]
+
+  @@map("work_schedule")
+}
+
+/// Which schedule applies, effective-dated. Resolution: employee > org unit (nearest ancestor) > company default.
+/// Exactly one of employee/org unit may be set; both null = company default.
+model ScheduleAssignment {
+  id            String       @id @default(uuid()) @db.Uuid
+  scheduleId    String       @map("schedule_id") @db.Uuid
+  schedule      WorkSchedule @relation(fields: [scheduleId], references: [id])
+  employeeId    String?      @map("employee_id") @db.Uuid
+  employee      Employee?    @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  orgUnitId     String?      @map("org_unit_id") @db.Uuid
+  orgUnit       OrgUnit?     @relation(fields: [orgUnitId], references: [id], onDelete: Cascade)
+  effectiveFrom DateTime     @map("effective_from") @db.Date
+  effectiveTo   DateTime?    @map("effective_to") @db.Date
+
+  @@index([employeeId])
+  @@index([orgUnitId])
+  @@map("schedule_assignment")
+}
+
+// ---------------------------------------------------------------------------
+// Customers, services, engagements
+// ---------------------------------------------------------------------------
+
+model Customer {
+  id             String       @id @default(uuid()) @db.Uuid
+  /// Business code shown to users (legacy company_id). Editable without touching foreign keys.
+  code           String       @unique
+  name           String
+  taxId          String?      @map("tax_id")
+  address        String?
+  accountOwnerId String?      @map("account_owner_id") @db.Uuid
+  accountOwner   Employee?    @relation("CustomerOwner", fields: [accountOwnerId], references: [id])
+  isActive       Boolean      @default(true) @map("is_active")
+  engagements    Engagement[]
+  createdAt      DateTime     @default(now()) @map("created_at")
+  updatedAt      DateTime     @updatedAt @map("updated_at")
+
+  @@map("customer")
+}
+
+/// Service catalogue as a tree, e.g. "Accounting" › "ปิดบัญชี - รายปี" (legacy encoded this in the name).
+model WorkCategory {
+  id          String           @id @default(uuid()) @db.Uuid
+  name        String
+  type        WorkCategoryType @default(CLIENT_WORK)
+  parentId    String?          @map("parent_id") @db.Uuid
+  parent      WorkCategory?    @relation("CategoryTree", fields: [parentId], references: [id])
+  children    WorkCategory[]   @relation("CategoryTree")
+  isBillable  Boolean          @default(true) @map("is_billable")
+  sortOrder   Int              @default(0) @map("sort_order")
+  isActive    Boolean          @default(true) @map("is_active")
+  legacyId    Int?             @unique @map("legacy_id")
+  engagements Engagement[]
+
+  @@map("work_category")
+}
+
+/// A loggable piece of work for a customer. Without a period it is ongoing (legacy behaviour);
+/// with a period (e.g. fiscal year) the same customer × service can exist once per period — pending docs/06 Q-ENG.
+model Engagement {
+  id             String       @id @default(uuid()) @db.Uuid
+  customerId     String       @map("customer_id") @db.Uuid
+  customer       Customer     @relation(fields: [customerId], references: [id])
+  workCategoryId String       @map("work_category_id") @db.Uuid
+  workCategory   WorkCategory @relation(fields: [workCategoryId], references: [id])
+  isActive       Boolean      @default(true) @map("is_active")
+  /// Optional engagement reference, e.g. "A001-CLOSE-2569".
+  code           String?      @unique
+  periodStart    DateTime?    @map("period_start") @db.Date
+  periodEnd      DateTime?    @map("period_end") @db.Date
+  budgetMinutes  Int?         @map("budget_minutes")
+  managerId      String?      @map("manager_id") @db.Uuid
+  manager        Employee?    @relation("EngagementManager", fields: [managerId], references: [id])
+  timeEntries    TimeEntry[]
+
+  // Unique (customer, category, period_start) NULLS NOT DISTINCT: in migration SQL.
+  @@index([customerId])
+  @@map("engagement")
+}
+
+// ---------------------------------------------------------------------------
+// Time report
+// ---------------------------------------------------------------------------
+
+model TimeEntry {
+  id              String          @id @default(uuid()) @db.Uuid
+  employeeId      String          @map("employee_id") @db.Uuid
+  employee        Employee        @relation("EntryOwner", fields: [employeeId], references: [id])
+  engagementId    String          @map("engagement_id") @db.Uuid
+  engagement      Engagement      @relation(fields: [engagementId], references: [id])
+  workDate        DateTime        @map("work_date") @db.Date
+  durationMinutes Int             @map("duration_minutes")
+  description     String?         @db.VarChar(500)
+  status          TimeEntryStatus @default(DRAFT)
+  /// Optimistic concurrency: clients must send the version they edited.
+  version         Int             @default(1)
+  createdAt       DateTime        @default(now()) @map("created_at")
+  createdById     String          @map("created_by_id") @db.Uuid
+  updatedAt       DateTime        @updatedAt @map("updated_at")
+  updatedById     String          @map("updated_by_id") @db.Uuid
+  deletedAt       DateTime?       @map("deleted_at")
+  deletedById     String?         @map("deleted_by_id") @db.Uuid
+  legacyIds       Int[]           @default([]) @map("legacy_ids")
+
+  // Partial unique index (employee, engagement, date) WHERE deleted_at IS NULL and CHECKs: in migration SQL.
+  @@index([employeeId, workDate])
+  @@index([engagementId, workDate])
+  @@map("time_entry")
+}
+
+model Holiday {
+  id          String   @id @default(uuid()) @db.Uuid
+  date        DateTime @unique @db.Date
+  /// Minutes of the working day that are off (540 = full day, legacy hl_time).
+  minutes     Int      @default(540)
+  description String
+
+  @@map("holiday")
+}
+
+/// A locked month rejects all time-entry writes. No month is locked by default (legacy had no lock).
+model PeriodLock {
+  month      String   @id /// YYYY-MM
+  lockedAt   DateTime @default(now()) @map("locked_at")
+  lockedById String   @map("locked_by_id") @db.Uuid
+  reason     String?
+
+  @@map("period_lock")
+}
+
+/// Company-wide entry rules (id = 1). Expected hours per day live in WorkSchedule.
+model TimePolicy {
+  id               Int  @id @default(1)
+  incrementMinutes Int  @default(30) @map("increment_minutes")
+  maxEntryMinutes  Int  @default(540) @map("max_entry_minutes")
+  /// null = daily total above the schedule only warns (legacy behaviour).
+  maxDailyMinutes  Int? @map("max_daily_minutes")
+  /// null = unlimited backdating (legacy behaviour).
+  backdateDays     Int? @map("backdate_days")
+  futureDays       Int  @default(31) @map("future_days")
+
+  @@map("time_policy")
+}
+
+// ---------------------------------------------------------------------------
+// Employee portal
+// ---------------------------------------------------------------------------
+
+/// Company announcements; `requiresAck` replaces the legacy monthly-meeting "รับทราบ" (meet / meet_agree).
+model Announcement {
+  id          String            @id @default(uuid()) @db.Uuid
+  title       String            @db.VarChar(200)
+  /// Plain text (rendered with line breaks, never as HTML).
+  body        String
+  requiresAck Boolean           @default(false) @map("requires_ack")
+  pinned      Boolean           @default(false)
+  publishedAt DateTime          @default(now()) @map("published_at")
+  authorId    String            @map("author_id") @db.Uuid
+  author      Employee          @relation(fields: [authorId], references: [id])
+  legacyId    Int?              @unique @map("legacy_id")
+  acks        AnnouncementAck[]
+
+  @@index([publishedAt])
+  @@map("announcement")
+}
+
+model AnnouncementAck {
+  announcementId String       @map("announcement_id") @db.Uuid
+  announcement   Announcement @relation(fields: [announcementId], references: [id], onDelete: Cascade)
+  employeeId     String       @map("employee_id") @db.Uuid
+  employee       Employee     @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  ackAt          DateTime     @default(now()) @map("ack_at")
+
+  @@id([announcementId, employeeId])
+  @@map("announcement_ack")
+}
+
+/// Application launcher entries (seeded from the legacy link portal).
+model AppLink {
+  id                 String  @id @default(uuid()) @db.Uuid
+  key                String  @unique
+  name               String
+  description        String?
+  url                String?
+  /// Lucide icon name or /brand/... image path.
+  icon               String
+  kind               AppKind
+  category           String
+  /// Only shown to users holding this permission (null = everyone).
+  requiredPermission String? @map("required_permission")
+  sortOrder          Int     @default(0) @map("sort_order")
+  isActive           Boolean @default(true) @map("is_active")
+
+  @@map("app_link")
+}
+
+// ---------------------------------------------------------------------------
+// Audit
+// ---------------------------------------------------------------------------
+
+/// Append-only (UPDATE/DELETE blocked by trigger in the init migration).
+model AuditEvent {
+  id           BigInt   @id @default(autoincrement())
+  occurredAt   DateTime @default(now()) @map("occurred_at")
+  actorId      String?  @map("actor_id") @db.Uuid
+  action       String
+  resourceType String   @map("resource_type")
+  resourceId   String?  @map("resource_id")
+  before       Json?
+  after        Json?
+  metadata     Json?
+  ip           String?
+  requestId    String?  @map("request_id")
+
+  @@index([resourceType, resourceId])
+  @@index([actorId, occurredAt])
+  @@map("audit_event")
+}

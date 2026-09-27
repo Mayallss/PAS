@@ -1,0 +1,19 @@
+# Local development only. Production uses Cloud SQL (see docs/05-proposed-architecture.md).
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: pas
+      POSTGRES_PASSWORD: pas_dev_only
+      POSTGRES_DB: pas
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./packages/db/docker-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pas -d pas"]
+      interval: 5s
+      retries: 10
+volumes:
+  pgdata:

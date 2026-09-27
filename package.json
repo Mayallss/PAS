@@ -1,0 +1,36 @@
+{
+  "name": "pas-platform",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "db:up": "docker compose up -d postgres",
+    "db:migrate": "npm run migrate --workspace @pas/db",
+    "db:seed": "npm run seed --workspace @pas/db",
+    "dev:api": "npm run dev --workspace @pas/api",
+    "dev:web": "npm run dev --workspace @pas/web",
+    "build": "npm run build --workspace @pas/api && npm run build --workspace @pas/web",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present",
+    "test": "npm run test --workspace @pas/api"
+  },
+  "allowScripts": {
+    "prisma@6.19.3": true,
+    "@prisma/client@6.19.3": true,
+    "@prisma/engines@6.19.3": true,
+    "esbuild@0.28.2": true,
+    "@scarf/scarf": false
+  },
+  "overrides": {
+    "deepmerge-ts": "^8.0.2",
+    "uuid": "^11.1.1"
+  },
+  "dependencies": {
+    "git": "^0.1.5"
+  }
+}

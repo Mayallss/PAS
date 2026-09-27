@@ -1,0 +1,24 @@
+{
+  "name": "@pas/db",
+  "version": "0.1.0",
+  "private": true,
+  "prisma": {
+    "schema": "prisma/schema.prisma",
+    "seed": "tsx prisma/seed.ts"
+  },
+  "scripts": {
+    "generate": "node --env-file-if-exists=../../.env ../../node_modules/prisma/build/index.js generate",
+    "migrate": "node --env-file-if-exists=../../.env ../../node_modules/prisma/build/index.js migrate dev",
+    "migrate:create": "node --env-file-if-exists=../../.env ../../node_modules/prisma/build/index.js migrate dev --create-only",
+    "migrate:deploy": "node --env-file-if-exists=../../.env ../../node_modules/prisma/build/index.js migrate deploy",
+    "seed": "node --env-file-if-exists=../../.env ../../node_modules/prisma/build/index.js db seed",
+    "studio": "node --env-file-if-exists=../../.env ../../node_modules/prisma/build/index.js studio"
+  },
+  "dependencies": {
+    "@prisma/client": "^6.19.0"
+  },
+  "devDependencies": {
+    "prisma": "^6.19.0",
+    "tsx": "^4.19.0"
+  }
+}
