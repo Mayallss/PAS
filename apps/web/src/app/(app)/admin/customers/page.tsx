@@ -1,0 +1,209 @@
+'use client';
+
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useDeferredValue, useState } from 'react';
+import { Alert, Button, Card, Dialog, Empty, Field, inputClass, Loading, PageHeader } from '@/components/ui';
+import { api, errorMessage } from '@/lib/api';
+import type { CustomerOption, EngagementOption } from '@/lib/types';
+
+interface CustomerForm {
+  id?: string;
+  code: string;
+  name: string;
+  taxId: string;
+  address: string;
+  accountOwnerId: string;
+  isActive: boolean;
+}
+
+const emptyForm: CustomerForm = { code: '', name: '', taxId: '', address: '', accountOwnerId: '', isActive: true };
+
+export default function CustomersAdminPage() {
+  const qc = useQueryClient();
+  const [search, setSearch] = useState('');
+  const deferred = useDeferredValue(search.trim());
+  const [editing, setEditing] = useState<CustomerForm | null>(null);
+  const [selected, setSelected] = useState<CustomerOption | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const customers = useQuery({
+    queryKey: ['admin-customers', deferred],
+    queryFn: () => api<CustomerOption[]>('/catalog/customers', { query: { search: deferred, includeInactive: 'true' } }),
+  });
+  const employees = useQuery({ queryKey: ['employees'], queryFn: () => api<{ id: string; fullName: string; status: string }[]>('/employees') });
+
+  const save = useMutation({
+    mutationFn: (f: CustomerForm) =>
+      api(f.id ? `/catalog/customers/${f.id}` : '/catalog/customers', {
+        method: f.id ? 'PUT' : 'POST',
+        body: {
+          code: f.code,
+          name: f.name,
+          taxId: f.taxId || null,
+          address: f.address || null,
+          accountOwnerId: f.accountOwnerId || null,
+          isActive: f.isActive,
+        },
+      }),
+    onSuccess: () => {
+      setEditing(null);
+      void qc.invalidateQueries({ queryKey: ['admin-customers'] });
+      void qc.invalidateQueries({ queryKey: ['customers'] });
+    },
+    onError: (e) => setError(errorMessage(e)),
+  });
+
+  return (
+    <div className="space-y-4">
+      <PageHeader title="ลูกค้าและงาน" description="กำหนดลูกค้าและประเภทงานที่พนักงานลงเวลาได้" />
+      <div className="grid gap-4 xl:grid-cols-[3fr_2fr]">
+        <Card
+          title="ลูกค้า"
+          actions={
+            <>
+              <input aria-label="ค้นหาลูกค้า" className={`${inputClass} w-56 py-1`} placeholder="ค้นหารหัส / ชื่อ" value={search} onChange={(e) => setSearch(e.target.value)} />
+              <Button size="sm" variant="primary" onClick={() => { setError(null); setEditing({ ...emptyForm }); }}>
+                + เพิ่มลูกค้า
+              </Button>
+            </>
+          }
+        >
+          {customers.isLoading ? (
+            <Loading />
+          ) : !customers.data?.length ? (
+            <Empty>ไม่พบลูกค้า</Empty>
+          ) : (
+            <div className="max-h-[70vh] overflow-auto">
+              <table className="min-w-full text-sm">
+                <thead className="sticky top-0 border-b bg-white text-left">
+                  <tr>
+                    <th className="py-1 pr-2">รหัส</th>
+                    <th className="py-1 pr-2">ชื่อ</th>
+                    <th className="py-1 pr-2">ผู้ดูแล</th>
+                    <th className="py-1 pr-2">สถานะ</th>
+                    <th />
+                  </tr>
+                </thead>
+                <tbody>
+                  {customers.data.map((c) => (
+                    <tr key={c.id} className={`border-b border-gray-100 ${selected?.id === c.id ? 'bg-brand-50' : ''}`}>
+                      <td className="py-1.5 pr-2 font-mono">{c.code}</td>
+                      <td className="py-1.5 pr-2">{c.name}</td>
+                      <td className="py-1.5 pr-2">{c.accountOwner?.fullName ?? '-'}</td>
+                      <td className="py-1.5 pr-2">{c.isActive ? 'ใช้งาน' : <span className="text-gray-500">ปิด</span>}</td>
+                      <td className="py-1.5 text-right whitespace-nowrap">
+                        <Button size="sm" variant="ghost" onClick={() => setSelected(c)}>
+                          งาน
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => {
+                            setError(null);
+                            setEditing({ id: c.id, code: c.code, name: c.name, taxId: c.taxId ?? '', address: c.address ?? '', accountOwnerId: c.accountOwner?.id ?? '', isActive: c.isActive });
+                          }}
+                        >
+                          แก้ไข
+                        </Button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </Card>
+        {selected ? <Engagements customer={selected} /> : <Card title="งานที่ลงเวลาได้"><Empty>เลือกลูกค้าเพื่อกำหนดงาน</Empty></Card>}
+      </div>
+
+      <Dialog
+        open={!!editing}
+        onClose={() => setEditing(null)}
+        title={editing?.id ? 'แก้ไขลูกค้า' : 'เพิ่มลูกค้า'}
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setEditing(null)}>
+              ยกเลิก
+            </Button>
+            <Button variant="primary" disabled={save.isPending || !editing?.code || !editing?.name} onClick={() => editing && save.mutate(editing)}>
+              บันทึก
+            </Button>
+          </>
+        }
+      >
+        {editing && (
+          <>
+            <Field label="รหัสลูกค้า" hint="แก้ไขได้ภายหลังโดยไม่กระทบข้อมูลเวลาเดิม">
+              <input className={inputClass} maxLength={20} value={editing.code} onChange={(e) => setEditing({ ...editing, code: e.target.value.toUpperCase() })} />
+            </Field>
+            <Field label="ชื่อ">
+              <input className={inputClass} maxLength={200} value={editing.name} onChange={(e) => setEditing({ ...editing, name: e.target.value })} />
+            </Field>
+            <Field label="เลขประจำตัวผู้เสียภาษี" hint="13 หลัก (ไม่บังคับ)">
+              <input className={inputClass} inputMode="numeric" maxLength={13} value={editing.taxId} onChange={(e) => setEditing({ ...editing, taxId: e.target.value.replace(/\D/g, '') })} />
+            </Field>
+            <Field label="ที่อยู่">
+              <textarea className={inputClass} rows={2} maxLength={500} value={editing.address} onChange={(e) => setEditing({ ...editing, address: e.target.value })} />
+            </Field>
+            <Field label="ผู้ดูแลลูกค้า">
+              <select className={inputClass} value={editing.accountOwnerId} onChange={(e) => setEditing({ ...editing, accountOwnerId: e.target.value })}>
+                <option value="">— ไม่ระบุ —</option>
+                {(employees.data ?? []).filter((e) => e.status === 'ACTIVE').map((e) => (
+                  <option key={e.id} value={e.id}>
+                    {e.fullName}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <label className="flex items-center gap-2 text-sm">
+              <input type="checkbox" checked={editing.isActive} onChange={(e) => setEditing({ ...editing, isActive: e.target.checked })} /> ใช้งาน
+            </label>
+            {error && <Alert tone="error">{error}</Alert>}
+          </>
+        )}
+      </Dialog>
+    </div>
+  );
+}
+
+function Engagements({ customer }: { customer: CustomerOption }) {
+  const qc = useQueryClient();
+  const [error, setError] = useState<string | null>(null);
+  const categories = useQuery({ queryKey: ['work-categories'], queryFn: () => api<{ id: string; name: string; type: string; isActive: boolean }[]>('/catalog/work-categories') });
+  const engagements = useQuery({
+    queryKey: ['admin-engagements', customer.id],
+    queryFn: () => api<EngagementOption[]>(`/catalog/customers/${customer.id}/engagements`, { query: { includeInactive: 'true' } }),
+  });
+  const toggle = useMutation({
+    mutationFn: ({ workCategoryId, isActive }: { workCategoryId: string; isActive: boolean }) =>
+      api(`/catalog/customers/${customer.id}/engagements/${workCategoryId}`, { method: 'PUT', body: { isActive } }),
+    onSuccess: () => {
+      setError(null);
+      void qc.invalidateQueries({ queryKey: ['admin-engagements', customer.id] });
+      void qc.invalidateQueries({ queryKey: ['engagements', customer.id] });
+    },
+    onError: (e) => setError(errorMessage(e)),
+  });
+  const active = new Set((engagements.data ?? []).filter((e) => e.isActive).map((e) => e.workCategory.id));
+
+  return (
+    <Card title={`งานที่ลงเวลาได้: ${customer.code}`}>
+      <p className="mb-2 text-sm text-gray-600">{customer.name}</p>
+      {error && <Alert tone="error">{error}</Alert>}
+      {categories.isLoading || engagements.isLoading ? (
+        <Loading />
+      ) : (
+        <ul className="max-h-[60vh] divide-y divide-gray-100 overflow-auto text-sm">
+          {(categories.data ?? []).filter((c) => c.isActive).map((c) => (
+            <li key={c.id}>
+              <label className="flex items-center gap-2 py-1.5">
+                <input type="checkbox" checked={active.has(c.id)} disabled={toggle.isPending} onChange={(e) => toggle.mutate({ workCategoryId: c.id, isActive: e.target.checked })} />
+                {c.name}
+              </label>
+            </li>
+          ))}
+        </ul>
+      )}
+    </Card>
+  );
+}

@@ -1,0 +1,18 @@
+node_modules/
+dist/
+.next/
+coverage/
+*.tsbuildinfo
+.env
+.env.*
+!.env.example
+
+# Local settings and private operational material
+.claude/
+docs/
+backup/
+db-backups/
+*.dump
+*.key
+*.pem
+*.log
