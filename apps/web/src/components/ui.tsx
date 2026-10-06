@@ -140,7 +140,7 @@ export function Kbd({ children }: { children: React.ReactNode }) {
 }
 
 /** Accessible modal on native <dialog>: focus trap, Esc closes, focus returns on close. */
-export function Dialog({ open, onClose, title, children, footer }: { open: boolean; onClose: () => void; title: string; children: React.ReactNode; footer?: React.ReactNode }) {
+export function Dialog({ open, onClose, title, children, footer, wide }: { open: boolean; onClose: () => void; title: string; children: React.ReactNode; footer?: React.ReactNode; wide?: boolean }) {
   const ref = useRef<HTMLDialogElement>(null);
   useEffect(() => {
     const d = ref.current;
@@ -156,7 +156,7 @@ export function Dialog({ open, onClose, title, children, footer }: { open: boole
         e.preventDefault();
         onClose();
       }}
-      className="m-auto w-[min(30rem,calc(100vw-2rem))] rounded-2xl p-0 shadow-pop backdrop:bg-gray-950/30 backdrop:backdrop-blur-[2px]"
+      className={`m-auto ${wide ? 'w-[min(40rem,calc(100vw-2rem))]' : 'w-[min(30rem,calc(100vw-2rem))]'} max-h-[calc(100vh-2rem)] rounded-2xl p-0 shadow-pop backdrop:bg-gray-950/30 backdrop:backdrop-blur-[2px]`}
       aria-labelledby="dialog-title"
     >
       {open && (

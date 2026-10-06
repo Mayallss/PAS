@@ -5,6 +5,7 @@ import { useDeferredValue, useState } from 'react';
 import { Alert, Button, Card, Dialog, Empty, Field, inputClass, Loading, PageHeader } from '@/components/ui';
 import { api, errorMessage } from '@/lib/api';
 import type { CustomerOption, EngagementOption } from '@/lib/types';
+import { Activities, type Activity } from './activities';
 
 interface CustomerForm {
   id?: string;
@@ -55,7 +56,7 @@ export default function CustomersAdminPage() {
 
   return (
     <div className="space-y-4">
-      <PageHeader title="ลูกค้าและงาน" description="กำหนดลูกค้าและประเภทงานที่พนักงานลงเวลาได้" />
+      <PageHeader title="ลูกค้าและ Activity" description="ลูกค้า (JOB) และ Activity ที่แต่ละลูกค้าเปิดให้พนักงานลงเวลาได้" />
       <div className="grid gap-4 xl:grid-cols-[3fr_2fr]">
         <Card
           title="ลูกค้า"
@@ -113,8 +114,10 @@ export default function CustomersAdminPage() {
             </div>
           )}
         </Card>
-        {selected ? <Engagements customer={selected} /> : <Card title="งานที่ลงเวลาได้"><Empty>เลือกลูกค้าเพื่อกำหนดงาน</Empty></Card>}
+        {selected ? <Engagements customer={selected} /> : <Card title="Activity ของลูกค้า"><Empty>เลือกลูกค้าเพื่อกำหนด Activity ที่ลงเวลาได้</Empty></Card>}
       </div>
+
+      <Activities />
 
       <Dialog
         open={!!editing}
@@ -169,7 +172,7 @@ export default function CustomersAdminPage() {
 function Engagements({ customer }: { customer: CustomerOption }) {
   const qc = useQueryClient();
   const [error, setError] = useState<string | null>(null);
-  const categories = useQuery({ queryKey: ['work-categories'], queryFn: () => api<{ id: string; name: string; type: string; isActive: boolean }[]>('/catalog/work-categories') });
+  const categories = useQuery({ queryKey: ['work-categories'], queryFn: () => api<Activity[]>('/catalog/work-categories') });
   const engagements = useQuery({
     queryKey: ['admin-engagements', customer.id],
     queryFn: () => api<EngagementOption[]>(`/catalog/customers/${customer.id}/engagements`, { query: { includeInactive: 'true' } }),
@@ -187,22 +190,34 @@ function Engagements({ customer }: { customer: CustomerOption }) {
   const active = new Set((engagements.data ?? []).filter((e) => e.isActive).map((e) => e.workCategory.id));
 
   return (
-    <Card title={`งานที่ลงเวลาได้: ${customer.code}`}>
-      <p className="mb-2 text-sm text-gray-600">{customer.name}</p>
+    <Card title={`Activity ของ ${customer.code}`} description={customer.name}>
       {error && <Alert tone="error">{error}</Alert>}
       {categories.isLoading || engagements.isLoading ? (
         <Loading />
       ) : (
-        <ul className="max-h-[60vh] divide-y divide-gray-100 overflow-auto text-sm">
-          {(categories.data ?? []).filter((c) => c.isActive).map((c) => (
-            <li key={c.id}>
-              <label className="flex items-center gap-2 py-1.5">
-                <input type="checkbox" checked={active.has(c.id)} disabled={toggle.isPending} onChange={(e) => toggle.mutate({ workCategoryId: c.id, isActive: e.target.checked })} />
-                {c.name}
-              </label>
-            </li>
-          ))}
-        </ul>
+        <div className="max-h-[60vh] space-y-3 overflow-auto text-sm">
+          {(() => {
+            const leaves = (categories.data ?? []).filter((c) => c.isActive && c.childCount === 0);
+            const groupNames = [...new Set(leaves.map((c) => c.parent?.name ?? ''))];
+            return groupNames.map((g) => (
+              <div key={g || 'none'}>
+                <p className="mb-1 text-[11px] font-semibold tracking-wide text-gray-400 uppercase">{g || 'ไม่อยู่ในกลุ่ม'}</p>
+                <ul className="divide-y divide-gray-100">
+                  {leaves
+                    .filter((c) => (c.parent?.name ?? '') === g)
+                    .map((c) => (
+                      <li key={c.id}>
+                        <label className="flex items-center gap-2 py-1.5">
+                          <input type="checkbox" checked={active.has(c.id)} disabled={toggle.isPending} onChange={(e) => toggle.mutate({ workCategoryId: c.id, isActive: e.target.checked })} />
+                          {c.name}
+                        </label>
+                      </li>
+                    ))}
+                </ul>
+              </div>
+            ));
+          })()}
+        </div>
       )}
     </Card>
   );

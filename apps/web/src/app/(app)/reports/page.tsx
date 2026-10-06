@@ -9,16 +9,18 @@ import { api, errorMessage } from '@/lib/api';
 import { addDays, currentMonth, hours, mondayOf, shiftMonth, STATUS_STYLE, THAI_WEEKDAY_SHORT, thaiDate, thaiDateShort, thaiMonth, todayBangkok, weekLabel } from '@/lib/format';
 import { can, useSession } from '@/lib/session';
 import type { DayStatus } from '@/lib/types';
+import { CustomerCost } from './_components/customer-cost';
 
 const TABS = [
   ['completeness', 'ความครบรายสัปดาห์'],
   ['timesheet', 'เวลารายเดือน'],
-  ['customers', 'ชั่วโมงตามลูกค้า'],
+  ['customers', 'ลูกค้า (ชั่วโมง / ต้นทุน)'],
   ['leave', 'รายการลา'],
 ] as const;
 type Tab = (typeof TABS)[number][0];
 
 export default function ReportsPage() {
+  const me = useSession();
   const [tab, setTab] = useState<Tab>('completeness');
   return (
     <div>
@@ -40,7 +42,7 @@ export default function ReportsPage() {
       <div role="tabpanel">
         {tab === 'completeness' && <Completeness />}
         {tab === 'timesheet' && <Timesheet />}
-        {tab === 'customers' && <CustomerEffort />}
+        {tab === 'customers' && (can(me, 'cost.read') ? <CustomerCost /> : <CustomerEffort />)}
         {tab === 'leave' && <Leave />}
       </div>
     </div>
@@ -66,8 +68,7 @@ function Nav({ label, onPrev, onNext }: { label: string; onPrev: () => void; onN
 interface CompletenessData {
   weekStart: string;
   weekEnd: string;
-  requiredMinutes: number;
-  employees: { id: string; fullName: string; recordedMinutes: number; missingMinutes: number; complete: boolean }[];
+  employees: { id: string; fullName: string; requiredMinutes: number; recordedMinutes: number; missingMinutes: number; complete: boolean }[];
 }
 
 function Completeness() {
@@ -83,7 +84,11 @@ function Completeness() {
   return (
     <div className="space-y-4">
       <div className="grid gap-4 sm:grid-cols-3">
-        <StatCard label="ต้องกรอกต่อคน" value={d ? `${hours(d.requiredMinutes)} ชม.` : '–'} hint="จันทร์–ศุกร์ หักวันหยุดบริษัท" />
+        <StatCard
+          label="ชั่วโมงที่ขาดรวม"
+          value={d ? `${hours(d.employees.reduce((a, e) => a + e.missingMinutes, 0)) || 0} ชม.` : '–'}
+          hint="แต่ละคนเทียบกับตารางงานของตนเอง หักวันหยุดบริษัท"
+        />
         <StatCard label="กรอกครบแล้ว" value={d ? `${d.employees.length - incomplete.length} / ${d.employees.length} คน` : '–'} progress={d ? [d.employees.length - incomplete.length, d.employees.length] : undefined} />
         <StatCard label="ยังไม่ครบ" value={d ? `${incomplete.length} คน` : '–'} tone={incomplete.length ? 'amber' : 'brand'} />
       </div>
@@ -105,9 +110,9 @@ function Completeness() {
                 <Link href={`/time-report?date=${d!.weekStart}&employeeId=${e.id}`} className="w-48 shrink-0 truncate text-[13px] font-medium text-gray-900 hover:text-brand-700">
                   {e.fullName}
                 </Link>
-                <Progress className="flex-1" value={e.recordedMinutes} max={d!.requiredMinutes} barClassName={e.complete ? 'bg-brand-500' : 'bg-amber-400'} />
+                <Progress className="flex-1" value={e.recordedMinutes} max={e.requiredMinutes} barClassName={e.complete ? 'bg-brand-500' : 'bg-amber-400'} />
                 <span className="w-24 text-right text-[13px] text-gray-900 tabular-nums">
-                  {hours(e.recordedMinutes) || 0} / {hours(d!.requiredMinutes)}
+                  {hours(e.recordedMinutes) || 0} / {hours(e.requiredMinutes) || 0}
                 </span>
                 <span className="w-24 text-right">{e.complete ? <Badge tone="brand">ครบ</Badge> : <Badge tone="amber">ขาด {hours(e.missingMinutes)} ชม.</Badge>}</span>
               </li>

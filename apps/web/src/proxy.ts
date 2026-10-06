@@ -14,6 +14,7 @@ export function proxy(request: NextRequest) {
 }
 
 export const config = {
-  // Everything except the login page, the API proxy and static assets.
-  matcher: ['/((?!login|api|_next/static|_next/image|favicon.ico).*)'],
+  // Everything except the login page, the public signing page (/sign, share link), set-password (one-time link), the API proxy and static assets (public/brand, any file with an image/font extension).
+  // Static files must bypass this check: the image optimizer fetches them without the user's cookie.
+  matcher: ['/((?!login|sign|set-password|api|_next/static|_next/image|brand/|favicon.ico|.*\\.(?:png|jpe?g|webp|avif|svg|ico|woff2?)$).*)'],
 };

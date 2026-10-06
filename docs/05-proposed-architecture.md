@@ -30,6 +30,7 @@ flowchart LR
 
 - **Internal by default**: ทั้ง Frontend และ API อยู่หลัง IAP/OIDC; ไม่มี Route สาธารณะใน Phase 1
 - Public Portal ในอนาคตเป็น Service และ Auth policy แยก (Load balancer path/host แยก, API prefix `/public/v1` แยก Guard)
+- **เว็บไซต์บริษัท (`apps/site`)** เป็นแอปแยกอีกตัว: Static (SSG) ทั้งหมด, ไม่มี Login/Cookie, ไม่เรียก API ภายใน, Deploy แยก (Cloud Run หรือ Static hosting + CDN) บนโดเมน pas-acc.com ขณะที่ Portal พนักงานอยู่คนละ Host หลัง IAP
 
 ## 3. Component / Module Structure
 

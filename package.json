@@ -14,10 +14,11 @@
     "db:seed": "npm run seed --workspace @pas/db",
     "dev:api": "npm run dev --workspace @pas/api",
     "dev:web": "npm run dev --workspace @pas/web",
-    "build": "npm run build --workspace @pas/api && npm run build --workspace @pas/web",
+    "build": "npm run build --workspace @pas/api && npm run build --workspace @pas/web && npm run build --workspace @pas/site",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "lint": "npm run lint --workspaces --if-present",
-    "test": "npm run test --workspace @pas/api"
+    "test": "npm run test --workspace @pas/api",
+    "dev:site": "npm run dev --workspace @pas/site"
   },
   "allowScripts": {
     "prisma@6.19.3": true,

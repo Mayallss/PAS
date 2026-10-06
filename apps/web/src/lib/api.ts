@@ -50,6 +50,22 @@ export async function api<T>(path: string, init: { method?: string; body?: unkno
   return data as T;
 }
 
+/** Multipart upload (evidence files). Same CSRF and error handling as `api`. */
+export async function apiUpload<T>(path: string, form: FormData): Promise<T> {
+  const res = await fetch(`/api${path}`, {
+    method: 'POST',
+    headers: { Accept: 'application/json', ...(csrfToken ? { 'X-CSRF-Token': csrfToken } : {}) },
+    credentials: 'same-origin',
+    body: form,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const message = res.status === 413 ? 'ไฟล์ใหญ่เกินกำหนด' : (data.message ?? 'อัปโหลดไม่สำเร็จ');
+    throw new ApiError(res.status, data.code ?? 'ERROR', message, data);
+  }
+  return data as T;
+}
+
 export function errorMessage(e: unknown): string {
   if (e instanceof ApiError) {
     const issues = (e.details as { issues?: { message: string }[] })?.issues;

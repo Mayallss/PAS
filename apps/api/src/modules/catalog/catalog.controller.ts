@@ -1,5 +1,5 @@
 import { Body, Controller, Get, Param, ParseUUIDPipe, Post, Put, Query, Req } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { Prisma, WorkCategoryType } from '@prisma/client';
 import { z } from 'zod';
 import { DomainError, notFound } from '../../common/errors';
 import { PrismaService } from '../../common/prisma.service';
@@ -29,6 +29,17 @@ const searchQuery = z.object({
   limit: z.coerce.number().int().min(1).max(50).default(30),
 });
 const engagementBody = z.object({ isActive: z.boolean() }).strict();
+/** An "Activity" (legacy job_table): a service/work type, optionally under a group (one level deep). */
+const activityBody = z
+  .object({
+    name: z.string().trim().min(1).max(150),
+    type: z.nativeEnum(WorkCategoryType),
+    parentId: z.string().uuid().nullable(),
+    isBillable: z.boolean(),
+    isActive: z.boolean(),
+    sortOrder: z.number().int().min(0).max(9999).default(0),
+  })
+  .strict();
 
 @Controller('catalog')
 export class CatalogController {
@@ -106,11 +117,57 @@ export class CatalogController {
   }
 
   @Get('work-categories')
-  workCategories() {
-    return this.prisma.workCategory.findMany({
+  async workCategories(@CurrentUser() user: AuthUser) {
+    const rows = await this.prisma.workCategory.findMany({
       orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
-      include: { parent: { select: { id: true, name: true } } },
+      include: {
+        parent: { select: { id: true, name: true } },
+        _count: { select: { children: true, engagements: true } },
+      },
     });
+    const admin = user.permissions.includes('catalog.write');
+    return rows.map(({ _count, legacyId, ...c }) => ({
+      ...c,
+      childCount: _count.children,
+      // Usage counts help admins decide whether deactivating is safe.
+      ...(admin ? { customerCount: _count.engagements, legacyId } : {}),
+    }));
+  }
+
+  @Post('work-categories')
+  @RequirePermission('catalog.write')
+  async createActivity(@Body(new ZodPipe(activityBody)) body: z.infer<typeof activityBody>, @Req() req: AppRequest) {
+    return this.prisma.$transaction(async (tx) => {
+      await this.assertValidParent(tx, null, body.parentId);
+      const c = await tx.workCategory.create({ data: body });
+      await this.audit.record({ action: 'activity.create', resourceType: 'work_category', resourceId: c.id, after: body }, req, tx);
+      return c;
+    });
+  }
+
+  @Put('work-categories/:id')
+  @RequirePermission('catalog.write')
+  async updateActivity(@Param('id', ParseUUIDPipe) id: string, @Body(new ZodPipe(activityBody)) body: z.infer<typeof activityBody>, @Req() req: AppRequest) {
+    return this.prisma.$transaction(async (tx) => {
+      const before = await tx.workCategory.findUnique({ where: { id }, include: { _count: { select: { children: true } } } });
+      if (!before) throw notFound('Activity');
+      await this.assertValidParent(tx, id, body.parentId);
+      if (body.parentId && before._count.children > 0) {
+        throw new DomainError('INVALID_PARENT', 'กลุ่มที่มี Activity ย่อยอยู่ ไม่สามารถย้ายไปอยู่ใต้กลุ่มอื่นได้', 422);
+      }
+      const c = await tx.workCategory.update({ where: { id }, data: body });
+      await this.audit.record({ action: 'activity.update', resourceType: 'work_category', resourceId: id, before, after: body }, req, tx);
+      return c;
+    });
+  }
+
+  /** Groups are one level deep: the parent must exist, be a top-level item, and not be the item itself. */
+  private async assertValidParent(tx: Prisma.TransactionClient, id: string | null, parentId: string | null) {
+    if (!parentId) return;
+    if (parentId === id) throw new DomainError('INVALID_PARENT', 'Activity เป็นกลุ่มของตัวเองไม่ได้', 422);
+    const parent = await tx.workCategory.findUnique({ where: { id: parentId } });
+    if (!parent) throw notFound('กลุ่ม');
+    if (parent.parentId) throw new DomainError('INVALID_PARENT', 'เลือกได้เฉพาะกลุ่มระดับบนสุด', 422);
   }
 
   @Post('customers')

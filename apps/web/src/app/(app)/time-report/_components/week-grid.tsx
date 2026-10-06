@@ -34,7 +34,7 @@ export function WeekGrid({ view, rows, selected, onSelect, onCommit, onAddTask, 
         <thead>
           <tr className="text-left">
             <th scope="col" className="sticky left-0 z-10 w-[32%] border-b border-gray-200 bg-white px-4 py-2.5 text-[12px] font-medium text-gray-500">
-              งาน
+              ลูกค้า / Activity
             </th>
             {view.days.map((d) => {
               const isToday = d.date === view.today;
@@ -72,6 +72,7 @@ export function WeekGrid({ view, rows, selected, onSelect, onCommit, onAddTask, 
                         <span className="font-mono text-[12px] text-gray-500">{r.customer.code}</span> {r.customer.name}
                       </p>
                       <p className="truncate text-[12px] text-gray-500">
+                        {r.workCategory.group && <span className="text-gray-400">{r.workCategory.group} › </span>}
                         {r.workCategory.name}
                         {r.carried && <span className="ml-1.5 text-gray-400">· จากสัปดาห์ก่อน</span>}
                         {!r.active && <span className="ml-1.5 text-rose-500">· ปิดแล้ว</span>}
@@ -92,7 +93,8 @@ export function WeekGrid({ view, rows, selected, onSelect, onCommit, onAddTask, 
                 </th>
                 {view.days.map((d, ci) => {
                   const entry = r.cells[d.date];
-                  const readOnly = !canEdit || d.locked || (!entry && !r.active);
+                  // Leave rows come from approved leave requests (docs/09): change them in การลา, not here.
+                  const readOnly = !canEdit || d.locked || r.workCategory.type === 'LEAVE' || (!entry && !r.active);
                   const isSel = selected?.engagementId === r.engagementId && selected.date === d.date;
                   return (
                     <td key={d.date} className={`border-b border-gray-100 p-0.5 ${colClass(d)} ${isSel ? 'bg-brand-50' : ''}`}>

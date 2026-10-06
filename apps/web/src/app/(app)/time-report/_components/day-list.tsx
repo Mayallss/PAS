@@ -60,7 +60,7 @@ export function DayList({ view, rows, day, onDay, onCommit, onAddTask }: {
                 col={0}
                 entry={r.cells[info.date]}
                 policy={view.policy}
-                readOnly={!view.editable || info.locked || (!r.cells[info.date] && !r.active)}
+                readOnly={!view.editable || info.locked || r.workCategory.type === 'LEAVE' || (!r.cells[info.date] && !r.active)}
                 label={`${r.customer.code} ${r.workCategory.name} ${thaiDate(info.date)}`}
                 onCommit={(m) => onCommit(r, info.date, m)}
               />

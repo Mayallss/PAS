@@ -28,6 +28,8 @@
 | 04 | [Migration Strategy](04-migration-strategy.md) | Data mapping, data-quality rules, cutover, rollback |
 | 05 | [Proposed Architecture](05-proposed-architecture.md) | Target architecture, stack decision, module structure, security |
 | 06 | [Open Questions / Decisions](06-open-questions.md) | สิ่งที่ต้องได้รับการยืนยันจากฝ่ายบริหารก่อน Milestone 2 |
+| 07 | [IT Asset & Employee Onboarding](07-it-asset-onboarding-design.md) | ทะเบียนอุปกรณ์ + ประวัติ/หลักฐาน, รับ-ออกพนักงาน (ร่างออกแบบ) |
+| 08 | [Document Workflow + เอกสาร IT](08-document-workflow-design.md) | แกนเอกสาร/อนุมัติกลาง, ใบขอซื้อ, ตู้รหัสผ่าน, ตรวจ ISO — พร้อมที่มาของทุกกฎ (ร่าง) |
 
 ## ป้ายกำกับที่ใช้ในเอกสาร
 

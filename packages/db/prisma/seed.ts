@@ -2,7 +2,7 @@
  * Development seed — fictional people and customers only. Real data arrives via tools/legacy-migration.
  * Roles and the company-default work schedule are created by the migration itself.
  * Test users (dev login, AUTH_DEV_LOGIN=true):
- *   employee@ employee2@ outsider@ manager@ partner@ admin@ it@  (all @pas.test)
+ *   employee@ employee2@ outsider@ manager@ partner@ admin@ it@ hr@  (all @pas.test)
  */
 import { AppKind, PrismaClient, WorkCategoryType } from '@prisma/client';
 
@@ -29,6 +29,7 @@ async function main() {
     { email: 'partner@pas.test', fullName: 'หุ้นส่วน ทดสอบ', nickname: 'พี', roles: ['EMPLOYEE', 'PARTNER'], level: 'D' },
     { email: 'admin@pas.test', fullName: 'ธุรการ ทดสอบ', nickname: 'แอด', roles: ['EMPLOYEE', 'ADMIN'], level: 'S' },
     { email: 'it@pas.test', fullName: 'ไอที ทดสอบ', nickname: 'ไอ', roles: ['EMPLOYEE', 'IT'], level: 'SS' },
+    { email: 'hr@pas.test', fullName: 'บุคคล ทดสอบ', nickname: 'เอช', roles: ['EMPLOYEE', 'HR'], level: 'S' },
   ];
   for (const u of users) {
     const e = await prisma.employee.upsert({
@@ -95,6 +96,28 @@ async function main() {
     }
   }
 
+  // Leave types on the legacy leave activities (production gets the same rows from the migration).
+  const leaveTypes: [number, string, string, number, number, number | null, string, number, string][] = [
+    [36, 'VACATION', 'ลาพักร้อน', 3240, 12, null, 'sky', 1, '[กฎหมาย] พ.ร.บ.คุ้มครองแรงงาน ม.30'],
+    [34, 'PERSONAL', 'ลากิจ', 1620, 0, null, 'amber', 2, '[กฎหมาย] ม.34'],
+    [35, 'SICK', 'ลาป่วย', 16200, 0, 3, 'rose', 3, '[กฎหมาย] ม.32, ม.57'],
+  ];
+  for (const [legacyId, key, name, annualMinutes, minTenureMonths, certificateFromDays, color, sortOrder, source] of leaveTypes) {
+    const wc = await prisma.workCategory.findUniqueOrThrow({ where: { legacyId } });
+    await prisma.leaveType.upsert({
+      where: { key },
+      update: {},
+      create: { key, name, workCategoryId: wc.id, annualMinutes, minTenureMonths, certificateFromDays, color, sortOrder, source },
+    });
+  }
+
+  for (const [i, room] of [
+    { name: 'ห้องประชุมใหญ่', location: 'ชั้น 2', capacity: 12, features: ['จอทีวี', 'กล้องประชุม', 'ไวท์บอร์ด'], color: 'indigo' },
+    { name: 'ห้องประชุมเล็ก', location: 'ชั้น 1', capacity: 4, features: ['จอทีวี'], color: 'emerald' },
+  ].entries()) {
+    await prisma.meetingRoom.upsert({ where: { name: room.name }, update: {}, create: { ...room, sortOrder: i } });
+  }
+
   const holidays: [string, string][] = [
     ['2026-10-13', 'วันนวมินทรมหาราช'],
     ['2026-10-23', 'วันปิยมหาราช'],
@@ -117,8 +140,8 @@ async function main() {
     await prisma.announcement.createMany({
       data: [
         {
-          title: 'สรุปการประชุมประจำเดือนกันยายน 2569',
-          body: 'ขอให้ทุกคนอ่านสรุปการประชุมและกด “รับทราบ” ภายในสิ้นเดือน\n\n1. ระบบบันทึกเวลาใหม่เริ่มทดลองใช้\n2. ปิดงบรายปีของลูกค้ากลุ่ม A ให้เสร็จภายในไตรมาส\n3. กำหนดการอบรมภายในเดือนหน้า',
+          title: 'ยินดีต้อนรับสู่ PAS Employee Portal',
+          body: 'ระบบใหม่รวมการบันทึกเวลา ประกาศ รายงานการประชุม และลิงก์ระบบต่าง ๆ ไว้ในที่เดียว\nหากพบปัญหาแจ้งฝ่าย IT ได้ทางเมนู IT Requests',
           requiresAck: true,
           pinned: true,
           authorId: admin.id,
@@ -134,36 +157,90 @@ async function main() {
     });
   }
 
-  // Application launcher — from the legacy link portal (link/index.php) + planned platform modules.
-  const apps: { key: string; name: string; description: string; url: string | null; icon: string; kind: AppKind; category: string; requiredPermission?: string }[] = [
-    { key: 'time-report', name: 'Time Report', description: 'บันทึกเวลาการทำงาน', url: '/time-report', icon: 'Clock3', kind: AppKind.INTERNAL, category: 'งานประจำ' },
-    { key: 'reports', name: 'รายงาน', description: 'รายงานเวลาทีมและลูกค้า', url: '/reports', icon: 'BarChart3', kind: AppKind.INTERNAL, category: 'งานประจำ', requiredPermission: 'report.team.read' },
-    { key: 'announcements', name: 'ประกาศ', description: 'ข่าวสารและรายงานประชุม', url: '/announcements', icon: 'Megaphone', kind: AppKind.INTERNAL, category: 'งานประจำ' },
-    { key: 'monday-todo', name: 'To Do List', description: 'แผนการทำงาน (monday.com)', url: 'https://pas-acc.monday.com/boards/1933853914', icon: '/brand/monday.svg', kind: AppKind.EXTERNAL, category: 'งานประจำ' },
-    { key: 'monday', name: 'Monday', description: 'pas-acc.monday.com', url: 'https://pas-acc.monday.com/', icon: '/brand/monday.svg', kind: AppKind.EXTERNAL, category: 'งานประจำ' },
-    { key: 'client-visit', name: 'พบลูกค้า', description: 'ฟอร์มบันทึกการพบลูกค้า', url: 'https://wkf.ms/4bTBRDt', icon: 'Handshake', kind: AppKind.EXTERNAL, category: 'งานประจำ' },
-    { key: 'doc-store', name: 'Document Store', description: 'ระบบจัดเก็บเอกสาร (เว็บ PAS)', url: 'https://pas-acc.com/document/index.php', icon: 'FolderArchive', kind: AppKind.EXTERNAL, category: 'เอกสาร' },
-    { key: 'doc-store-old', name: 'Document Store (เดิม)', description: 'จัดเก็บเอกสารบน AppSheet', url: 'https://www.appsheet.com/start/a27b143c-6b64-4898-b1be-3f0b03359404', icon: '/brand/appsheet.png', kind: AppKind.EXTERNAL, category: 'เอกสาร' },
-    { key: 'doc-borrow', name: 'ขอนำเอกสารออก', description: 'Document Borrowing Request', url: 'https://wkf.ms/3Y82ocu', icon: 'FileOutput', kind: AppKind.EXTERNAL, category: 'เอกสาร' },
-    { key: 'delivery', name: 'Delivery System', description: 'รับ-ส่งเอกสาร', url: 'https://pas-acc.monday.com/boards/1862570548', icon: 'Truck', kind: AppKind.EXTERNAL, category: 'เอกสาร' },
-    { key: 'pickup', name: 'Pickup System', description: 'รับ-ส่งเอกสารที่ สนง. PAS', url: 'https://pas-acc.monday.com/boards/1879567470', icon: 'PackageCheck', kind: AppKind.EXTERNAL, category: 'เอกสาร' },
-    { key: 'inventory', name: 'The Inventory', description: 'เบิกวัสดุสำนักงาน', url: 'https://pas-acc.com/theinventory/', icon: 'Boxes', kind: AppKind.EXTERNAL, category: 'สำนักงาน' },
-    { key: 'it-request', name: 'IT Requests', description: 'แจ้งปัญหา IT support', url: 'https://wkf.ms/4cj8t9E', icon: 'LifeBuoy', kind: AppKind.EXTERNAL, category: 'สำนักงาน' },
-    { key: 'it-howto', name: 'IT How To', description: 'คู่มือ IT (เครือข่ายภายใน)', url: 'http://192.168.10.254/it/index.php', icon: 'BookOpen', kind: AppKind.EXTERNAL, category: 'สำนักงาน' },
-    { key: 'website', name: 'เว็บไซต์บริษัท', description: 'pas-acc.com', url: 'https://www.pas-acc.com/', icon: 'Globe', kind: AppKind.EXTERNAL, category: 'สำนักงาน' },
-    { key: 'doc-center', name: 'Document Center', description: 'ศูนย์เอกสารบนแพลตฟอร์มใหม่', url: null, icon: 'Files', kind: AppKind.PLANNED, category: 'เร็ว ๆ นี้' },
-    { key: 'internal-request', name: 'Internal Requests', description: 'คำขอภายในพร้อมการอนุมัติ', url: null, icon: 'Inbox', kind: AppKind.PLANNED, category: 'เร็ว ๆ นี้' },
-    { key: 'procurement', name: 'Procurement', description: 'จัดซื้อจัดจ้าง', url: null, icon: 'ShoppingCart', kind: AppKind.PLANNED, category: 'เร็ว ๆ นี้' },
-    { key: 'it-asset', name: 'IT Asset', description: 'ทะเบียนทรัพย์สิน IT', url: null, icon: 'Laptop', kind: AppKind.PLANNED, category: 'เร็ว ๆ นี้' },
-    { key: 'hr', name: 'HR', description: 'การลาและข้อมูลพนักงาน', url: null, icon: 'Users', kind: AppKind.PLANNED, category: 'เร็ว ๆ นี้' },
+  // Meeting minutes (legacy `meet`): rich text, versioned, certified per version.
+  if ((await prisma.meeting.count()) === 0) {
+    const body =
+      '<h3>วาระที่ 1 เรื่องแจ้งเพื่อทราบ</h3><p>ระบบบันทึกเวลาใหม่เริ่มทดลองใช้ตั้งแต่วันที่ 1 ตุลาคม 2569</p>' +
+      '<h3>วาระที่ 2 เรื่องพิจารณา</h3><ol><li>ปิดงบรายปีของลูกค้ากลุ่ม A ให้เสร็จภายในไตรมาส</li><li>จัดอบรมภายในเรื่องภาษีมูลค่าเพิ่มในเดือนหน้า</li></ol>' +
+      '<table><thead><tr><th>งาน</th><th>ผู้รับผิดชอบ</th><th>กำหนดเสร็จ</th></tr></thead><tbody><tr><td>ปิดงบกลุ่ม A</td><td>ทีมบัญชี A</td><td>31 ธ.ค. 2569</td></tr></tbody></table>';
+    const m = await prisma.meeting.create({
+      data: { title: 'ประชุมประจำเดือน กันยายน 2569', meetingDate: new Date('2026-09-25T00:00:00Z'), startTime: '09:00', endTime: '11:00', location: 'ห้องประชุมใหญ่', bodyHtml: body, authorId: admin.id },
+    });
+    await prisma.meetingRevision.create({ data: { meetingId: m.id, version: 1, title: m.title, bodyHtml: body, authorId: admin.id } });
+  }
+
+  // Apps = sidebar + launcher + command palette (legacy link portal links + platform pages).
+  // Order here = order inside each sidebar group. requiredPermissions: ANY of them (empty = everyone).
+  type App = { key: string; name: string; description: string; url: string | null; icon: string; kind: AppKind; category: string; requiredPermissions?: string[]; isAdmin?: boolean };
+  const DAILY = 'งานประจำ';
+  const DOCS = 'เอกสาร';
+  const OFFICE = 'สำนักงาน';
+  const ADMIN = 'ผู้ดูแลระบบ';
+  const SOON = 'เร็ว ๆ นี้';
+  const apps: App[] = [
+    { key: 'plan', name: 'แผนงาน (To-do)', description: 'วางแผนงานรายวัน / มอบงานให้ทีม', url: '/plan', icon: 'ListTodo', kind: AppKind.INTERNAL, category: DAILY, requiredPermissions: ['time.own.write', 'report.team.read', 'report.all.read'] },
+    { key: 'time-report', name: 'บันทึกเวลา', description: 'บันทึกเวลาการทำงาน', url: '/time-report', icon: 'Clock3', kind: AppKind.INTERNAL, category: DAILY },
+    { key: 'meetings', name: 'รายงานการประชุม', description: 'อ่าน รับรอง หรือแย้งรายงาน', url: '/meetings', icon: 'ClipboardCheck', kind: AppKind.INTERNAL, category: DAILY },
+    { key: 'announcements', name: 'ประกาศ', description: 'ข่าวสารจากสำนักงาน', url: '/announcements', icon: 'Megaphone', kind: AppKind.INTERNAL, category: DAILY },
+    { key: 'reports', name: 'รายงาน', description: 'รายงานเวลาทีมและลูกค้า', url: '/reports', icon: 'BarChart3', kind: AppKind.INTERNAL, category: DAILY, requiredPermissions: ['report.team.read', 'report.all.read'] },
+    { key: 'monday-todo', name: 'To Do List', description: 'แผนการทำงาน (monday.com)', url: 'https://pas-acc.monday.com/boards/1933853914', icon: '/brand/monday.svg', kind: AppKind.EXTERNAL, category: DAILY },
+    { key: 'monday', name: 'Monday', description: 'pas-acc.monday.com', url: 'https://pas-acc.monday.com/', icon: '/brand/monday.svg', kind: AppKind.EXTERNAL, category: DAILY },
+    { key: 'client-visit', name: 'พบลูกค้า', description: 'ฟอร์มบันทึกการพบลูกค้า', url: 'https://wkf.ms/4bTBRDt', icon: 'Handshake', kind: AppKind.EXTERNAL, category: DAILY },
+    { key: 'handoff', name: 'รับ–ส่งเอกสาร', description: 'ส่งมอบเอกสารพร้อมลายเซ็น', url: '/handoff', icon: 'Signature', kind: AppKind.INTERNAL, category: DOCS, requiredPermissions: ['handoff.use'] },
+    { key: 'doc-store', name: 'Document Store', description: 'ระบบจัดเก็บเอกสาร (เว็บ PAS)', url: 'https://pas-acc.com/document/index.php', icon: 'FolderArchive', kind: AppKind.EXTERNAL, category: DOCS },
+    { key: 'doc-store-old', name: 'Document Store (เดิม)', description: 'จัดเก็บเอกสารบน AppSheet', url: 'https://www.appsheet.com/start/a27b143c-6b64-4898-b1be-3f0b03359404', icon: '/brand/appsheet.png', kind: AppKind.EXTERNAL, category: DOCS },
+    { key: 'doc-borrow', name: 'ขอนำเอกสารออก', description: 'Document Borrowing Request', url: 'https://wkf.ms/3Y82ocu', icon: 'FileOutput', kind: AppKind.EXTERNAL, category: DOCS },
+    { key: 'delivery', name: 'Delivery System', description: 'รับ-ส่งเอกสาร', url: 'https://pas-acc.monday.com/boards/1862570548', icon: 'Truck', kind: AppKind.EXTERNAL, category: DOCS },
+    { key: 'pickup', name: 'Pickup System', description: 'รับ-ส่งเอกสารที่ สนง. PAS', url: 'https://pas-acc.monday.com/boards/1879567470', icon: 'PackageCheck', kind: AppKind.EXTERNAL, category: DOCS },
+    { key: 'it-asset', name: 'อุปกรณ์ IT', description: 'เครื่องของฉัน แจ้งซ่อม และทะเบียนอุปกรณ์', url: '/it-assets', icon: 'Laptop', kind: AppKind.INTERNAL, category: OFFICE },
+    { key: 'it-request', name: 'IT Requests', description: 'แจ้งปัญหา IT support', url: 'https://wkf.ms/4cj8t9E', icon: 'LifeBuoy', kind: AppKind.EXTERNAL, category: OFFICE },
+    { key: 'inventory', name: 'The Inventory', description: 'เบิกวัสดุสำนักงาน', url: 'https://pas-acc.com/theinventory/', icon: 'Boxes', kind: AppKind.EXTERNAL, category: OFFICE },
+    { key: 'it-howto', name: 'IT How To', description: 'คู่มือ IT (เครือข่ายภายใน)', url: 'http://192.168.10.254/it/index.php', icon: 'BookOpen', kind: AppKind.EXTERNAL, category: OFFICE },
+    { key: 'website', name: 'เว็บไซต์บริษัท', description: 'pas-acc.com', url: 'https://www.pas-acc.com/', icon: 'Globe', kind: AppKind.EXTERNAL, category: OFFICE },
+    { key: 'admin-customers', name: 'ลูกค้าและ Activity', description: 'ข้อมูลลูกค้า งานบริการ และ Engagement', url: '/admin/customers', icon: 'Building2', kind: AppKind.INTERNAL, category: ADMIN, requiredPermissions: ['catalog.write'], isAdmin: true },
+    { key: 'admin-calendar', name: 'วันหยุดและนโยบาย', description: 'วันหยุด ตารางงาน ปิดงวด นโยบายบันทึกเวลา', url: '/admin/calendar', icon: 'CalendarCog', kind: AppKind.INTERNAL, category: ADMIN, requiredPermissions: ['calendar.write'], isAdmin: true },
+    { key: 'admin-employees', name: 'พนักงานและสิทธิ์', description: 'พนักงาน ทีม บทบาท อัตราต้นทุน', url: '/admin/employees', icon: 'Users', kind: AppKind.INTERNAL, category: ADMIN, requiredPermissions: ['employee.admin', 'role.admin'], isAdmin: true },
+    { key: 'admin-onboarding', name: 'งานรับพนักงานใหม่', description: 'Checklist รับ/ออกพนักงาน', url: '/admin/onboarding', icon: 'ListChecks', kind: AppKind.INTERNAL, category: ADMIN, requiredPermissions: ['onboarding.manage'], isAdmin: true },
+    { key: 'doc-center', name: 'Document Center', description: 'ศูนย์เอกสารบนแพลตฟอร์มใหม่', url: null, icon: 'Files', kind: AppKind.PLANNED, category: SOON },
+    { key: 'internal-request', name: 'Internal Requests', description: 'คำขอภายในพร้อมการอนุมัติ', url: null, icon: 'Inbox', kind: AppKind.PLANNED, category: SOON },
+    { key: 'procurement', name: 'Procurement', description: 'จัดซื้อจัดจ้าง', url: null, icon: 'ShoppingCart', kind: AppKind.PLANNED, category: SOON },
+    { key: 'hr', name: 'HR', description: 'การลาและข้อมูลพนักงาน', url: null, icon: 'Users', kind: AppKind.PLANNED, category: SOON },
   ];
   for (const [i, a] of apps.entries()) {
-    await prisma.appLink.upsert({
-      where: { key: a.key },
-      update: { ...a, requiredPermission: a.requiredPermission ?? null, sortOrder: i },
-      create: { ...a, requiredPermission: a.requiredPermission ?? null, sortOrder: i },
+    const data = { ...a, requiredPermissions: a.requiredPermissions ?? [], isAdmin: a.isAdmin ?? false, sortOrder: i };
+    await prisma.appLink.upsert({ where: { key: a.key }, update: data, create: data });
+  }
+  // IT asset samples (fictional). Categories/systems/templates come from the migration.
+  if ((await prisma.asset.count()) === 0) {
+    const it = await byEmail('it@pas.test');
+    const employee = await byEmail('employee@pas.test');
+    const cat = async (key: string) => (await prisma.assetCategory.findUniqueOrThrow({ where: { key } })).id;
+    const vendor = await prisma.vendor.upsert({ where: { name: 'ร้านคอมพิวเตอร์ตัวอย่าง' }, update: {}, create: { name: 'ร้านคอมพิวเตอร์ตัวอย่าง' } });
+    const room = await prisma.location.upsert({ where: { name: 'ห้อง Server' }, update: {}, create: { name: 'ห้อง Server' } });
+    const d = (iso: string) => new Date(`${iso}T00:00:00Z`);
+    const samples = [
+      { code: 'NB-0101', key: 'NOTEBOOK', brand: 'LENOVO', model: 'IdeaPad Slim 3 14IRH10', specs: { cpu: 'Intel i5-13420H', ram: '16 GB', storage: 'SSD 512 GB', os: '11 home' }, purchaseDate: '2026-03-09', cost: 18990 },
+      { code: 'NB-0102', key: 'NOTEBOOK', brand: 'ASUS', model: 'X515', specs: { cpu: 'Intel i5-1035G1', ram: '8 GB', storage: 'SSD 512 GB', os: '11 home' }, purchaseDate: '2021-09-14', cost: 17810.28 },
+      { code: 'PC-0101', key: 'DESKTOP', brand: 'LENOVO', model: 'ideacentre 300', specs: { cpu: 'Intel i3-6100', ram: '4 GB', storage: 'HDD 500 GB', os: '10 Pro' }, purchaseDate: '2016-10-21', cost: 10308.41 },
+      { code: 'MO-0101', key: 'MONITOR', brand: 'Dell', model: 'P2422H', specs: { size: '24"' }, purchaseDate: '2025-07-18', cost: 4990 },
+    ];
+    for (const a of samples) {
+      const asset = await prisma.asset.create({
+        data: { code: a.code, categoryId: await cat(a.key), brand: a.brand, model: a.model, specs: a.specs, purchaseDate: d(a.purchaseDate), cost: a.cost, vendorId: vendor.id },
+      });
+      await prisma.assetEvent.create({ data: { assetId: asset.id, type: 'REGISTERED', occurredOn: d(a.purchaseDate), title: 'ลงทะเบียน (ข้อมูลตัวอย่าง)', recordedById: it.id } });
+    }
+    const nb = await prisma.asset.findUniqueOrThrow({ where: { code: 'NB-0101' } });
+    await prisma.assetAssignment.create({ data: { assetId: nb.id, employeeId: employee.id, kind: 'PRIMARY', startDate: d('2026-03-09'), createdById: it.id } });
+    await prisma.assetEvent.create({ data: { assetId: nb.id, type: 'ASSIGNED', occurredOn: d('2026-03-09'), title: 'มอบให้ สมชาย ทดสอบ (ใช้ประจำ)', employeeId: employee.id, recordedById: it.id } });
+    const pc = await prisma.asset.findUniqueOrThrow({ where: { code: 'PC-0101' } });
+    await prisma.assetAssignment.create({ data: { assetId: pc.id, locationId: room.id, kind: 'SHARED', startDate: d('2020-01-01'), createdById: it.id } });
+    await prisma.asset.update({ where: { id: pc.id }, data: { specs: { cpu: 'Intel i3-6100', ram: '4 GB', storage: 'SSD 256 GB', os: '10 Pro' } } });
+    await prisma.assetEvent.create({
+      data: { assetId: pc.id, type: 'UPGRADE', occurredOn: d('2026-06-10'), title: 'เปลี่ยน HDD เป็น SSD', specDiff: { storage: ['HDD 500 GB', 'SSD 256 GB'] }, cost: 1860, vendorId: vendor.id, recordedById: it.id },
     });
   }
+
   console.log('Seed complete');
 }
 

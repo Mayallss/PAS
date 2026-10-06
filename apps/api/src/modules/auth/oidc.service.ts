@@ -20,7 +20,12 @@ export class OidcService {
 
   private getClient(): Promise<BaseClient> {
     const c = loadConfig();
-    this.client ??= Issuer.discover(c.OIDC_ISSUER).then(
+    // Discovery happens on first login, never at boot: Google being unreachable must not stop the API.
+    // A failed attempt is forgotten so the next login retries (it used to stay broken until a restart).
+    this.client ??= Issuer.discover(c.OIDC_ISSUER).catch((e) => {
+      this.client = undefined;
+      throw e;
+    }).then(
       (issuer) =>
         new issuer.Client({
           client_id: c.OIDC_CLIENT_ID,

@@ -9,12 +9,12 @@ const inter = Inter({ subsets: ['latin'], variable: '--font-inter', display: 'sw
 const thai = Noto_Sans_Thai({ subsets: ['thai'], variable: '--font-thai', display: 'swap' });
 
 export const metadata: Metadata = {
-  title: { default: 'PAS Time', template: '%s · PAS Time' },
+  title: { default: 'PAS Employee Portal', template: '%s · PAS' },
   description: 'ระบบบันทึกเวลาทำงาน PAS',
   robots: { index: false, follow: false },
 };
 
-export const viewport: Viewport = { themeColor: '#059669' };
+export const viewport: Viewport = { themeColor: '#2E3192' };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (

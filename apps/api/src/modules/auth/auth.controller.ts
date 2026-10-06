@@ -12,12 +12,17 @@ import { AuditService } from '../audit/audit.service';
 import type { AuthUser } from './auth.types';
 import { CurrentUser, Public } from './decorators';
 import { OidcService, OidcTransaction } from './oidc.service';
+import { PasswordService } from './password.service';
 import { SessionService, sessionCookieName } from './session.service';
 
 const OIDC_TX_COOKIE = 'pas_oidc_tx';
 const devLoginSchema = z.object({ email: z.string().email().max(200) });
-/** Per-IP login attempts per minute (brute-force protection). */
-const LOGIN_THROTTLE = { default: { limit: Number(process.env.LOGIN_RATE_LIMIT ?? 10), ttl: 60_000 } };
+const passwordLoginSchema = z.object({ username: z.string().trim().min(1).max(60), password: z.string().min(1).max(200) }).strict();
+const setupTokenSchema = z.object({ token: z.string().min(20).max(100) });
+const setupSchema = z.object({ token: z.string().min(20).max(100), password: z.string().min(1).max(200) }).strict();
+const changeSchema = z.object({ current: z.string().min(1).max(200), next: z.string().min(1).max(200) }).strict();
+/** Per-IP login attempts per minute. 30: an office behind one NAT address must not lock itself out at 08:30; guessing one account is stopped by its own lock (5 wrong → 15 min). */
+const LOGIN_THROTTLE = { default: { limit: Number(process.env.LOGIN_RATE_LIMIT ?? 30), ttl: 60_000 } };
 
 @Controller('auth')
 export class AuthController {
@@ -26,13 +31,14 @@ export class AuthController {
     private readonly sessions: SessionService,
     private readonly oidc: OidcService,
     private readonly audit: AuditService,
+    private readonly passwords: PasswordService,
   ) {}
 
   @Public()
   @Get('config')
   config() {
     const c = loadConfig();
-    return { sso: c.oidcEnabled, devLogin: c.AUTH_DEV_LOGIN };
+    return { sso: c.oidcEnabled, password: c.PASSWORD_LOGIN, devLogin: c.AUTH_DEV_LOGIN };
   }
 
   @Get('me')
@@ -47,7 +53,15 @@ export class AuthController {
   async login(@Res() res: Response) {
     const c = loadConfig();
     if (!c.oidcEnabled) throw new DomainError('SSO_NOT_CONFIGURED', 'ยังไม่ได้ตั้งค่า SSO', HttpStatus.NOT_FOUND);
-    const { url, tx } = await this.oidc.authorizationUrl();
+    let started: Awaited<ReturnType<OidcService['authorizationUrl']>>;
+    try {
+      started = await this.oidc.authorizationUrl();
+    } catch {
+      // Google unreachable: back to the login page with a clear message instead of a raw 500. Sessions already
+      // open keep working — they are ours, not Google's.
+      return res.redirect(`${c.APP_ORIGIN}/login?error=sso_unavailable`);
+    }
+    const { url, tx } = started;
     res.cookie(OIDC_TX_COOKIE, JSON.stringify(tx), {
       httpOnly: true,
       secure: c.secureCookies,
@@ -106,6 +120,46 @@ export class AuthController {
       throw new DomainError('LOGIN_FAILED', 'ไม่พบผู้ใช้', HttpStatus.UNAUTHORIZED);
     }
     await this.startSession(employee.id, 'dev', req, res);
+  }
+
+  /** Username + password (works without Google). Per-IP rate limit + per-account lock after 5 wrong passwords. */
+  @Public()
+  @Throttle(LOGIN_THROTTLE)
+  @Post('password-login')
+  @HttpCode(204)
+  async passwordLogin(@Body(new ZodPipe(passwordLoginSchema)) body: z.infer<typeof passwordLoginSchema>, @Req() req: AppRequest, @Res({ passthrough: true }) res: Response) {
+    const employeeId = await this.passwords.login(body.username, body.password, req);
+    await this.startSession(employeeId, 'password', req, res);
+  }
+
+  /** The set-password page shows whose account the one-time link is for. */
+  @Public()
+  @Throttle(LOGIN_THROTTLE)
+  @Get('password-setup')
+  setupInfo(@Query(new ZodPipe(setupTokenSchema)) q: z.infer<typeof setupTokenSchema>) {
+    return this.passwords.setupInfo(q.token);
+  }
+
+  /** Choose a password with the one-time link from an administrator; signs in straight away. */
+  @Public()
+  @Throttle(LOGIN_THROTTLE)
+  @Post('password-setup')
+  @HttpCode(204)
+  async setup(@Body(new ZodPipe(setupSchema)) body: z.infer<typeof setupSchema>, @Req() req: AppRequest, @Res({ passthrough: true }) res: Response) {
+    const employeeId = await this.passwords.completeSetup(body.token, body.password, req);
+    await this.startSession(employeeId, 'password-setup', req, res);
+  }
+
+  @Throttle(LOGIN_THROTTLE)
+  @Post('password')
+  @HttpCode(204)
+  async changePassword(@CurrentUser() user: AuthUser, @Body(new ZodPipe(changeSchema)) body: z.infer<typeof changeSchema>, @Req() req: AppRequest) {
+    await this.passwords.change(user, body.current, body.next, req);
+  }
+
+  @Get('password')
+  passwordStatus(@CurrentUser() user: AuthUser) {
+    return this.passwords.status(user.id).then((s) => ({ enabled: s.enabled, username: s.username, hasPassword: s.hasPassword, passwordChangedAt: s.passwordChangedAt }));
   }
 
   @Post('logout')

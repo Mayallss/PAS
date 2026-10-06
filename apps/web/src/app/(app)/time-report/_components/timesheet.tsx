@@ -12,6 +12,7 @@ import type { MonthSummary, Task, WeekRow, WeekView } from '@/lib/types';
 import { SaveInput, useCellSaver, useMonth, useSyncStatus, useWeek, weekKey } from '../_lib/timesheet-data';
 import { focusCell } from './cell-input';
 import { DayList } from './day-list';
+import { FillFromPlan } from './fill-from-plan';
 import { Inspector } from './inspector';
 import { MonthCalendar } from './month-calendar';
 import { CellRef, WeekGrid } from './week-grid';
@@ -57,7 +58,7 @@ export function Timesheet({ initialWeek, initialMonth }: { initialWeek?: WeekVie
 
 // ---------------------------------------------------------------------------
 
-function Header({ title, subtitle, children }: { title: string; subtitle?: React.ReactNode; children: React.ReactNode }) {
+export function Header({ title, subtitle, children }: { title: string; subtitle?: React.ReactNode; children: React.ReactNode }) {
   return (
     <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
       <div>
@@ -89,7 +90,7 @@ function ViewToggle({ view, onChange }: { view: 'week' | 'month'; onChange: (v: 
   );
 }
 
-function Stepper({ label, onPrev, onNext, onToday, isCurrent }: { label: string; onPrev: () => void; onNext: () => void; onToday: () => void; isCurrent: boolean }) {
+export function Stepper({ label, onPrev, onNext, onToday, isCurrent }: { label: string; onPrev: () => void; onNext: () => void; onToday: () => void; isCurrent: boolean }) {
   return (
     <div className="flex items-center gap-1">
       <Button variant="secondary" size="icon" onClick={onPrev} aria-label="ก่อนหน้า">
@@ -108,7 +109,7 @@ function Stepper({ label, onPrev, onNext, onToday, isCurrent }: { label: string;
   );
 }
 
-function EmployeePicker({ value, onChange }: { value: string | undefined; onChange: (id: string | null) => void }) {
+export function EmployeePicker({ value, onChange }: { value: string | undefined; onChange: (id: string | null) => void }) {
   const me = useSession();
   const enabled = can(me, 'report.team.read', 'report.all.read');
   const q = useQuery({ queryKey: ['employees'], queryFn: () => api<{ id: string; fullName: string }[]>('/employees'), enabled, staleTime: 5 * 60_000 });
@@ -158,7 +159,7 @@ function SyncIndicator() {
   );
 }
 
-function Stat({ label, children, footer, className = '' }: { label: string; children: React.ReactNode; footer?: React.ReactNode; className?: string }) {
+export function Stat({ label, children, footer, className = '' }: { label: string; children: React.ReactNode; footer?: React.ReactNode; className?: string }) {
   return (
     <div className={`rounded-xl bg-white p-3.5 shadow-card ring-1 ring-gray-200/80 sm:p-4 ${className}`}>
       <p className="truncate text-[12px] font-medium text-gray-500">{label}</p>
@@ -228,6 +229,7 @@ function WeekPanel({ date, employeeId, navigate, today, initial }: PanelProps & 
         }
       >
         {own && <SyncIndicator />}
+        {own && view.editable && <FillFromPlan date={weekStart} today={today} />}
         <EmployeePicker value={employeeId} onChange={(id) => navigate({ employeeId: id })} />
         <ViewToggle view="week" onChange={(v) => navigate({ view: v, month: date.slice(0, 7) })} />
         <Stepper
@@ -272,14 +274,14 @@ function WeekPanel({ date, employeeId, navigate, today, initial }: PanelProps & 
         >
           {completeDays} <span className="text-base font-normal text-gray-400">/ {dueDays.length} วัน</span>
         </Stat>
-        <Stat label={todayInWeek ? 'วันนี้' : 'เป้าหมายต่อวัน'} className="hidden sm:block">
+        <Stat label={todayInWeek ? 'วันนี้' : 'ตารางงาน'} className="hidden sm:block" footer={view.scheduleName ? <p className="truncate text-[12px] text-gray-500">{view.scheduleName}</p> : undefined}>
           {todayInWeek ? (
             <span className={STATUS_STYLE[todayInWeek.status].text}>
               {hours(todayInWeek.totalMinutes) || '0'} <span className="text-base font-normal text-gray-400">/ {hours(todayInWeek.requiredMinutes) || 0} ชม.</span>
             </span>
           ) : (
             <>
-              {view.policy.dailyTargetMinutes / 60} <span className="text-base font-normal text-gray-400">ชม.</span>
+              {hours(view.totals.requiredMinutes) || 0} <span className="text-base font-normal text-gray-400">ชม./สัปดาห์</span>
             </>
           )}
         </Stat>

@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { Keyboard, MessageSquareText, Trash2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Button, inputClass, Kbd } from '@/components/ui';
@@ -39,7 +40,8 @@ export function Inspector({ view, rows, selected, onSave }: { view: WeekView; ro
   const dayEntries = rows
     .map((r) => ({ r, e: r.cells[day.date] }))
     .filter(({ e }) => e && !e.deleted);
-  const editable = view.editable && !day.locked;
+  const isLeave = row.workCategory.type === 'LEAVE';
+  const editable = view.editable && !day.locked && !isLeave;
   const noteChanged = (live?.description ?? '') !== note;
 
   return (
@@ -57,6 +59,11 @@ export function Inspector({ view, rows, selected, onSave }: { view: WeekView; ro
             </p>
             <p className="text-gray-600">{row.workCategory.name}</p>
             <p className="mt-0.5 text-[11px] text-gray-400">{CATEGORY_LABEL[row.workCategory.type]}</p>
+            {isLeave && (
+              <p className="mt-1 text-[11.5px] text-violet-700">
+                มาจากใบลาที่อนุมัติแล้ว — แก้ไข/ยกเลิกได้ที่เมนู <Link href="/leave" className="font-medium underline underline-offset-2">การลา</Link>
+              </p>
+            )}
           </div>
         </div>
         <div className="flex items-baseline justify-between">

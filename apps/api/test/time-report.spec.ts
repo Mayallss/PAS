@@ -253,9 +253,47 @@ describe('authorization & data scoping', () => {
 });
 
 describe('employee administration', () => {
-  it('blocks self-escalation and IT granting ADMIN', async () => {
-    await admin.agent.patch(`/api/employees/${admin.userId}`).set('X-CSRF-Token', admin.csrf).send({ roles: ['EMPLOYEE'] }).expect(403);
-    await itUser.agent.patch(`/api/employees/${employee2.userId}`).set("X-CSRF-Token", itUser.csrf).send({ roles: ['EMPLOYEE', 'ADMIN'] }).expect(403);
+  it('blocks self-escalation and granting permissions you do not hold', async () => {
+    const roleId = async (key: string) => (await prisma.role.findUniqueOrThrow({ where: { key } })).id;
+    await admin.agent
+      .patch(`/api/employees/${admin.userId}`)
+      .set('X-CSRF-Token', admin.csrf)
+      .send({ roleAssignments: [{ roleId: await roleId('EMPLOYEE'), orgUnitId: null }] })
+      .expect(403);
+    const res = await itUser.agent
+      .patch(`/api/employees/${employee2.userId}`)
+      .set('X-CSRF-Token', itUser.csrf)
+      .send({ roleAssignments: [{ roleId: await roleId('EMPLOYEE'), orgUnitId: null }, { roleId: await roleId('ADMIN'), orgUnitId: null }] })
+      .expect(403);
+    expect(res.body.permissions).toEqual(expect.arrayContaining(['catalog.write', 'role.admin']));
+    // IT may still hand out roles within its own permissions.
+    await itUser.agent
+      .patch(`/api/employees/${employee2.userId}`)
+      .set('X-CSRF-Token', itUser.csrf)
+      .send({ roleAssignments: [{ roleId: await roleId('EMPLOYEE'), orgUnitId: null }] })
+      .expect(200);
+  });
+
+  it('a role scoped to an org unit limits report visibility to that unit', async () => {
+    const teamB = await prisma.orgUnit.findFirstOrThrow({ where: { name: 'ทีมบัญชี B' } });
+    const partnerRole = await prisma.role.findUniqueOrThrow({ where: { key: 'PARTNER' } });
+    const employeeRole = await prisma.role.findUniqueOrThrow({ where: { key: 'EMPLOYEE' } });
+    await admin.agent
+      .patch(`/api/employees/${employee2.userId}`)
+      .set('X-CSRF-Token', admin.csrf)
+      .send({ roleAssignments: [{ roleId: employeeRole.id, orgUnitId: null }, { roleId: partnerRole.id, orgUnitId: teamB.id }] })
+      .expect(200);
+    // Permissions are resolved per request: the existing session sees the new role immediately.
+    const res = await employee2.agent.get('/api/reports/timesheet?month=2026-09').expect(200);
+    const ids = res.body.employees.map((e: { id: string }) => e.id);
+    expect(ids).toContain(outsider.userId);
+    expect(ids).not.toContain(employee.userId);
+    await admin.agent
+      .patch(`/api/employees/${employee2.userId}`)
+      .set('X-CSRF-Token', admin.csrf)
+      .send({ roleAssignments: [{ roleId: employeeRole.id, orgUnitId: null }] })
+      .expect(200);
+    await employee2.agent.get('/api/reports/timesheet?month=2026-09').expect(403);
   });
 
   it('deactivating an employee kills their live sessions immediately', async () => {
@@ -279,7 +317,8 @@ describe('reports & export', () => {
 
   it('weekly completeness subtracts holidays once', async () => {
     const res = await partner.agent.get('/api/time-report/completeness?weekOf=2026-10-14').expect(200);
-    expect(res.body).toMatchObject({ weekStart: '2026-10-12', weekEnd: '2026-10-16', requiredMinutes: 4 * 540 });
+    expect(res.body).toMatchObject({ weekStart: '2026-10-12', weekEnd: '2026-10-18' });
+    expect(res.body.employees.find((e: { id: string }) => e.id === employee.userId).requiredMinutes).toBe(4 * 540);
   });
 
   it('customer effort aggregates hours by level without costs', async () => {
@@ -300,6 +339,284 @@ describe('audit trail', () => {
   it('never stores secrets in audit payloads', async () => {
     const rows = await prisma.auditEvent.findMany();
     expect(JSON.stringify(rows, (_, v) => (typeof v === 'bigint' ? v.toString() : v))).not.toContain(employee.csrf);
+  });
+});
+
+describe('work schedules (effective-dated)', () => {
+  it('a personal part-time schedule changes required minutes from its effective date only', async () => {
+    const part = await prisma.workSchedule.findUniqueOrThrow({ where: { name: 'Part-time ครึ่งวัน จันทร์–ศุกร์' } });
+    await employee.agent.post('/api/calendar/schedules/assignments').set('X-CSRF-Token', employee.csrf).send({ scheduleId: part.id, employeeId: employee.userId, effectiveFrom: '2026-10-19' }).expect(403);
+    await admin.agent
+      .post('/api/calendar/schedules/assignments')
+      .set('X-CSRF-Token', admin.csrf)
+      .send({ scheduleId: part.id, employeeId: employee.userId, effectiveFrom: '2026-10-21' })
+      .expect(201);
+    const res = await employee.agent.get('/api/time-report/week?date=2026-10-19').expect(200);
+    const req = res.body.days.map((d: { requiredMinutes: number }) => d.requiredMinutes);
+    expect(req).toEqual([540, 540, 240, 240, 0, 0, 0]); // Fri 23 Oct is a company holiday
+    // Earlier weeks keep the old requirement — history is not rewritten.
+    const before = await employee.agent.get('/api/time-report/week?date=2026-10-12').expect(200);
+    expect(before.body.totals.requiredMinutes).toBe(4 * 540);
+    // Other people are unaffected.
+    const other = await employee2.agent.get('/api/time-report/week?date=2026-10-19').expect(200);
+    expect(other.body.totals.requiredMinutes).toBe(4 * 540); // 5 days minus the Fri 23 Oct holiday
+  });
+
+  it('an org-unit schedule applies to its members; a personal one wins over it', async () => {
+    const eight = await admin.agent
+      .post('/api/calendar/schedules')
+      .set('X-CSRF-Token', admin.csrf)
+      .send({ name: 'ทีม 8 ชม.', weekdayMinutes: [480, 480, 480, 480, 480, 0, 0] })
+      .expect(201);
+    const teamA = await prisma.orgUnit.findFirstOrThrow({ where: { name: 'ทีมบัญชี A' } });
+    await admin.agent
+      .post('/api/calendar/schedules/assignments')
+      .set('X-CSRF-Token', admin.csrf)
+      .send({ scheduleId: eight.body.id, orgUnitId: teamA.id, effectiveFrom: '2026-11-02' })
+      .expect(201);
+    const e2 = await employee2.agent.get('/api/time-report/week?date=2026-11-02').expect(200);
+    expect(e2.body.days[0]).toMatchObject({ requiredMinutes: 480, scheduledMinutes: 480 });
+    const e1 = await employee.agent.get('/api/time-report/week?date=2026-11-02').expect(200);
+    expect(e1.body.days[0].requiredMinutes).toBe(240); // personal part-time still wins
+    // outsider's own session was revoked by the deactivation test — read it through a partner.
+    const out = await partner.agent.get(`/api/time-report/week?date=2026-11-02&employeeId=${outsider.userId}`).expect(200);
+    expect(out.body.days[0].requiredMinutes).toBe(540); // team B keeps the company default
+  });
+
+  it('rejects overlapping assignments for the same scope and invalid schedules', async () => {
+    const part = await prisma.workSchedule.findUniqueOrThrow({ where: { name: 'Part-time ครึ่งวัน จันทร์–ศุกร์' } });
+    const res = await admin.agent
+      .post('/api/calendar/schedules/assignments')
+      .set('X-CSRF-Token', admin.csrf)
+      .send({ scheduleId: part.id, employeeId: employee.userId, effectiveFrom: '2026-10-01', effectiveTo: '2026-10-30' })
+      .expect(409);
+    expect(res.body.code).toBe('SCHEDULE_OVERLAP');
+    await admin.agent.post('/api/calendar/schedules').set('X-CSRF-Token', admin.csrf).send({ name: 'x', weekdayMinutes: [1, 2, 3] }).expect(400);
+  });
+});
+
+describe('roles as data', () => {
+  it('admins define custom roles; permissions must be known and within their own', async () => {
+    const res = await admin.agent
+      .post('/api/roles')
+      .set('X-CSRF-Token', admin.csrf)
+      .send({ key: 'AUDITOR', name: 'ผู้ตรวจสอบ', permissions: ['report.all.read', 'audit.read'] })
+      .expect(201);
+    expect(res.body.permissions).toEqual(['audit.read', 'report.all.read']);
+    await admin.agent.post('/api/roles').set('X-CSRF-Token', admin.csrf).send({ key: 'BAD', name: 'x', permissions: ['db.drop'] }).expect(400);
+    await itUser.agent.post('/api/roles').set('X-CSRF-Token', itUser.csrf).send({ key: 'X', name: 'x', permissions: [] }).expect(403);
+  });
+
+  it('the ADMIN role cannot lose role/employee administration; system roles cannot be deleted', async () => {
+    const adminRole = await prisma.role.findUniqueOrThrow({ where: { key: 'ADMIN' } });
+    await admin.agent.put(`/api/roles/${adminRole.id}`).set('X-CSRF-Token', admin.csrf).send({ key: 'ADMIN', name: 'Admin', permissions: ['time.own.write'] }).expect(422);
+    await admin.agent.delete(`/api/roles/${adminRole.id}`).set('X-CSRF-Token', admin.csrf).expect(422);
+  });
+});
+
+describe('employee portal', () => {
+  it('home returns profile, week, attention items, announcements and permitted apps in one request', async () => {
+    const res = await employee.agent.get('/api/home').expect(200);
+    expect(res.body.profile.fullName).toBe('สมชาย ทดสอบ');
+    expect(res.body.week.days).toHaveLength(7);
+    const kinds = res.body.attention.map((a: { kind: string }) => a.kind);
+    expect(kinds).toContain('TIME_MISSING');
+    expect(kinds).toContain('ACK_REQUIRED');
+    const keys = res.body.apps.map((a: { key: string }) => a.key);
+    expect(keys).toContain('time-report');
+    expect(keys).not.toContain('reports'); // needs report permission
+    expect(res.body.apps.find((a: { kind: string }) => a.kind === 'PLANNED').url).toBeNull();
+    const mgr = await manager.agent.get('/api/home').expect(200);
+    expect(mgr.body.apps.map((a: { key: string }) => a.key)).toContain('reports');
+  });
+
+  it('acknowledging an announcement removes it from notifications and is idempotent', async () => {
+    const list = await employee.agent.get('/api/announcements').expect(200);
+    const target = list.body.find((a: { requiresAck: boolean }) => a.requiresAck);
+    expect(target.ackedAt).toBeNull();
+    expect(target).not.toHaveProperty('ackCount'); // progress only for writers
+    await employee.agent.post(`/api/announcements/${target.id}/ack`).set('X-CSRF-Token', employee.csrf).expect(201);
+    await employee.agent.post(`/api/announcements/${target.id}/ack`).set('X-CSRF-Token', employee.csrf).expect(201);
+    const n = await employee.agent.get('/api/notifications').expect(200);
+    expect(n.body.items.some((i: { kind: string }) => i.kind === 'ACK_REQUIRED')).toBe(false);
+    const forAdmin = await admin.agent.get('/api/announcements').expect(200);
+    expect(forAdmin.body.find((a: { id: string }) => a.id === target.id).ackCount).toBeGreaterThanOrEqual(1);
+  });
+
+  it('only announcement writers can publish; bodies are stored as plain text', async () => {
+    await employee.agent.post('/api/announcements').set('X-CSRF-Token', employee.csrf).send({ title: 't', body: 'b' }).expect(403);
+    const res = await admin.agent
+      .post('/api/announcements')
+      .set('X-CSRF-Token', admin.csrf)
+      .send({ title: 'ทดสอบ', body: '<img src=x onerror=alert(1)>', requiresAck: false })
+      .expect(201);
+    expect(res.body.body).toBe('<img src=x onerror=alert(1)>'); // stored verbatim; the UI renders it as text
+  });
+});
+
+describe('activities (legacy job_table)', () => {
+  it('admins create an activity under a group; it becomes selectable for a customer and searchable', async () => {
+    const group = await prisma.workCategory.findFirstOrThrow({ where: { name: 'บริการบัญชี', parentId: null } });
+    const res = await admin.agent
+      .post('/api/catalog/work-categories')
+      .set('X-CSRF-Token', admin.csrf)
+      .send({ name: 'ตรวจสอบภายใน', type: 'CLIENT_WORK', parentId: group.id, isBillable: true, isActive: true })
+      .expect(201);
+    const a003 = await prisma.customer.findUniqueOrThrow({ where: { code: 'A003' } });
+    await admin.agent.put(`/api/catalog/customers/${a003.id}/engagements/${res.body.id}`).set('X-CSRF-Token', admin.csrf).send({ isActive: true }).expect(200);
+    const found = await employee2.agent.get('/api/catalog/engagements/search?q=A003 ตรวจสอบ').expect(200);
+    expect(found.body).toHaveLength(1);
+    expect(found.body[0].workCategory).toMatchObject({ name: 'ตรวจสอบภายใน', group: 'บริการบัญชี' });
+  });
+
+  it('employees cannot manage activities; groups are one level deep and cannot contain themselves', async () => {
+    await employee.agent.post('/api/catalog/work-categories').set('X-CSRF-Token', employee.csrf).send({ name: 'x', type: 'INTERNAL', parentId: null, isBillable: false, isActive: true }).expect(403);
+    const child = await prisma.workCategory.findUniqueOrThrow({ where: { legacyId: 1 } });
+    const group = await prisma.workCategory.findFirstOrThrow({ where: { name: 'บริการบัญชี', parentId: null } });
+    const body = { name: 'x', type: 'CLIENT_WORK', isBillable: true, isActive: true };
+    expect((await admin.agent.post('/api/catalog/work-categories').set('X-CSRF-Token', admin.csrf).send({ ...body, parentId: child.id }).expect(422)).body.code).toBe('INVALID_PARENT');
+    await admin.agent.put(`/api/catalog/work-categories/${group.id}`).set('X-CSRF-Token', admin.csrf).send({ ...body, name: 'บริการบัญชี', parentId: group.id }).expect(422);
+  });
+
+  it('deactivating an activity hides it from pickers but keeps past time entries', async () => {
+    const act = await prisma.workCategory.findUniqueOrThrow({ where: { legacyId: 40 } });
+    await admin.agent
+      .put(`/api/catalog/work-categories/${act.id}`)
+      .set('X-CSRF-Token', admin.csrf)
+      .send({ name: act.name, type: act.type, parentId: act.parentId, isBillable: act.isBillable, isActive: false })
+      .expect(200);
+    const found = await employee.agent.get('/api/catalog/engagements/search?q=A001 ปิดบัญชี - รายเดือน').expect(200);
+    expect(found.body).toHaveLength(0);
+    const week = await employee.agent.get('/api/time-report/week?date=2026-09-02').expect(200);
+    const row = week.body.rows.find((r: { engagementId: string }) => r.engagementId === a001Closing);
+    expect(row.active).toBe(false);
+    expect(row.totalMinutes).toBeGreaterThan(0);
+    await admin.agent
+      .put(`/api/catalog/work-categories/${act.id}`)
+      .set('X-CSRF-Token', admin.csrf)
+      .send({ name: act.name, type: act.type, parentId: act.parentId, isBillable: act.isBillable, isActive: true })
+      .expect(200);
+  });
+});
+
+describe('meeting minutes: objections, revisions, highlights and re-certification', () => {
+  let meetingId: string;
+  const v1 = '<h3>วาระที่ 1</h3><p>ที่ประชุมมีมติให้ปิดงบภายในไตรมาส</p><p>ผู้รับผิดชอบคือทีมบัญชี A</p>';
+  const certify = (s: Session, body: object) => s.agent.post(`/api/meetings/${meetingId}/certify`).set('X-CSRF-Token', s.csrf).send(body);
+  const status = async (s: Session) => (await s.agent.get(`/api/meetings/${meetingId}`).expect(200)).body.myStatus;
+  const revise = (body: object) => admin.agent.put(`/api/meetings/${meetingId}`).set('X-CSRF-Token', admin.csrf).send(body);
+  const base = { title: 'ประชุมทดสอบ', meetingDate: '2026-09-26', startTime: '09:00', endTime: '10:30' };
+
+  it('only writers record minutes; HTML is sanitised; the author is not asked to certify', async () => {
+    await employee.agent.post('/api/meetings').set('X-CSRF-Token', employee.csrf).send({ ...base, bodyHtml: v1 }).expect(403);
+    const res = await admin.agent
+      .post('/api/meetings')
+      .set('X-CSRF-Token', admin.csrf)
+      .send({ ...base, bodyHtml: v1 + '<script>alert(1)</script><p onclick="x()">ok</p>' })
+      .expect(201);
+    meetingId = res.body.id;
+    const detail = await employee.agent.get(`/api/meetings/${meetingId}`).expect(200);
+    expect(detail.body.bodyHtml).not.toMatch(/script|onclick/);
+    expect(detail.body.myStatus).toBe('PENDING');
+    expect((await admin.agent.get(`/api/meetings/${meetingId}`)).body.myStatus).toBeNull();
+    await certify(admin, { version: 1, status: 'ACCEPTED' }).expect(403);
+    const n = await employee.agent.get('/api/notifications').expect(200);
+    expect(n.body.items).toEqual(expect.arrayContaining([expect.objectContaining({ kind: 'MEETING_CERTIFY', meetingId, reason: 'NEW' })]));
+  });
+
+  it('an objection must quote text that exists in the current version and say what is wrong', async () => {
+    expect((await certify(employee, { version: 1, status: 'OBJECTION', quote: 'ข้อความที่ไม่มีอยู่จริง', note: 'x' }).expect(422)).body.code).toBe('QUOTE_NOT_FOUND');
+    await certify(employee, { version: 1, status: 'OBJECTION', quote: 'ภายในไตรมาส' }).expect(400);
+    await certify(employee, { version: 1, status: 'OBJECTION', quote: '  ภายในไตรมาส ', note: 'ที่ประชุมตกลงเป็นภายในเดือนหน้า' }).expect(201);
+    expect(await status(employee)).toBe('OBJECTION');
+    await certify(employee2, { version: 1, status: 'ACCEPTED' }).expect(201);
+    expect(await status(employee2)).toBe('ACCEPTED');
+    const n = await admin.agent.get('/api/notifications').expect(200);
+    expect(n.body.items).toEqual(expect.arrayContaining([expect.objectContaining({ kind: 'MEETING_OBJECTIONS', meetingId, count: 1 })]));
+    const detail = await admin.agent.get(`/api/meetings/${meetingId}`).expect(200);
+    expect(detail.body.objections[0]).toMatchObject({ employee: 'สมชาย ทดสอบ', quote: 'ภายในไตรมาส', version: 1 });
+  });
+
+  it('a substantive revision needs a change note, bumps the version and requires everyone to certify again', async () => {
+    const v2 = v1.replace('ภายในไตรมาส', 'ภายในเดือนหน้า') + '<p>เพิ่มเติม: รายงานความคืบหน้าทุกวันศุกร์</p>';
+    await revise({ ...base, bodyHtml: v2, expectedVersion: 1, requiresRecertification: true }).expect(400); // no change note
+    await revise({ ...base, bodyHtml: v2, expectedVersion: 9, requiresRecertification: true, changeNote: 'x' }).expect(409);
+    const current = (await admin.agent.get(`/api/meetings/${meetingId}`)).body.bodyHtml;
+    await revise({ ...base, bodyHtml: current, expectedVersion: 1, requiresRecertification: true, changeNote: 'x' }).expect(422); // no changes
+    await revise({ ...base, bodyHtml: v2, expectedVersion: 1, requiresRecertification: true, changeNote: 'แก้ตามที่คุณสมชายแย้ง และเพิ่มการรายงานความคืบหน้า' }).expect(200);
+
+    // Everyone who certified v1 must certify again and sees what changed since the version they certified.
+    const d = await employee2.agent.get(`/api/meetings/${meetingId}`).expect(200);
+    expect(d.body).toMatchObject({ version: 2, myStatus: 'OUTDATED' });
+    expect(d.body.diff).toMatchObject({ from: 1, to: 2 });
+    expect(d.body.diff.html).toContain('<del class="diff-del">ไตรมาส</del>');
+    expect(d.body.diff.html).toContain('<ins class="diff-ins">เดือนหน้า</ins>');
+    expect(d.body.diff.html).toContain('<ins class="diff-ins">เพิ่มเติม: รายงานความคืบหน้าทุกวันศุกร์</ins>');
+    const n = await employee2.agent.get('/api/notifications').expect(200);
+    expect(n.body.items).toEqual(expect.arrayContaining([expect.objectContaining({ kind: 'MEETING_CERTIFY', reason: 'REVISED', version: 2 })]));
+    // The objector's v1 objection is answered by v2 — they must review v2 rather than stay "objecting".
+    expect(await status(employee)).toBe('OUTDATED');
+  });
+
+  it('certifying an old version is rejected with the current version number', async () => {
+    const res = await certify(employee2, { version: 1, status: 'ACCEPTED' }).expect(409);
+    expect(res.body).toMatchObject({ code: 'VERSION_CONFLICT', version: 2 });
+    await certify(employee2, { version: 2, status: 'ACCEPTED' }).expect(201);
+    expect(await status(employee2)).toBe('ACCEPTED');
+  });
+
+  it('a minor fix creates a version with highlights but keeps existing certifications valid', async () => {
+    const cur = (await admin.agent.get(`/api/meetings/${meetingId}`)).body;
+    await revise({
+      ...base,
+      bodyHtml: cur.bodyHtml.replace('ทีมบัญชี A', 'ทีมบัญชี A (คุณผู้จัดการ)'),
+      expectedVersion: 2,
+      requiresRecertification: false,
+      changeNote: 'แก้คำผิด',
+    }).expect(200);
+    const d = await employee2.agent.get(`/api/meetings/${meetingId}`).expect(200);
+    expect(d.body).toMatchObject({ version: 3, certifyFromVersion: 2, myStatus: 'ACCEPTED' });
+    expect(d.body.diff).toMatchObject({ from: 2, to: 3 }); // still shows what changed after they certified
+    const compare = await employee2.agent.get(`/api/meetings/${meetingId}?compare=1`).expect(200);
+    expect(compare.body.diff.from).toBe(1);
+  });
+
+  it('the author can answer an objection without changing the minutes; the objector then accepts', async () => {
+    await certify(employee, { version: 3, status: 'OBJECTION', quote: 'รายงานความคืบหน้าทุกวันศุกร์', note: 'ตกลงกันว่าทุกวันจันทร์' }).expect(201);
+    const me = (await employee.agent.get('/api/auth/me')).body.user.id;
+    await employee.agent.post(`/api/meetings/${meetingId}/objections/${me}/reply`).set('X-CSRF-Token', employee.csrf).send({ version: 3, reply: 'x' }).expect(403);
+    await admin.agent
+      .post(`/api/meetings/${meetingId}/objections/${me}/reply`)
+      .set('X-CSRF-Token', admin.csrf)
+      .send({ version: 3, reply: 'ตรวจบันทึกเสียงแล้ว ที่ประชุมสรุปวันศุกร์' })
+      .expect(201);
+    expect(await status(employee)).toBe('OBJECTION_REPLIED');
+    const n = await employee.agent.get('/api/notifications').expect(200);
+    expect(n.body.items).toEqual(expect.arrayContaining([expect.objectContaining({ kind: 'MEETING_CERTIFY', meetingId, reason: 'REPLIED' })]));
+    await certify(employee, { version: 3, status: 'ACCEPTED' }).expect(201);
+    expect(await status(employee)).toBe('ACCEPTED');
+    const history = (await employee.agent.get(`/api/meetings/${meetingId}`)).body.myHistory;
+    expect(history.map((h: { version: number; status: string }) => `${h.version}:${h.status}`).sort()).toEqual(['1:OBJECTION', '3:ACCEPTED']);
+  });
+
+  it('writers see the roster; certified minutes cannot be deleted', async () => {
+    const d = await admin.agent.get(`/api/meetings/${meetingId}`).expect(200);
+    const byName = Object.fromEntries(d.body.roster.map((r: { fullName: string; status: string }) => [r.fullName, r.status]));
+    expect(byName['สมชาย ทดสอบ']).toBe('ACCEPTED');
+    expect(byName['สมหญิง ทดสอบ']).toBe('ACCEPTED');
+    expect(byName['ผู้จัดการ ทดสอบ']).toBe('PENDING');
+    expect(byName['ธุรการ ทดสอบ']).toBeUndefined(); // the author
+    expect(d.body.revisions.map((r: { version: number }) => r.version)).toEqual([3, 2, 1]);
+    expect((await admin.agent.delete(`/api/meetings/${meetingId}`).set('X-CSRF-Token', admin.csrf).expect(409)).body.code).toBe('IN_USE');
+    const list = await employee.agent.get('/api/meetings').expect(200);
+    expect(list.body.find((m: { id: string }) => m.id === meetingId)).not.toHaveProperty('counts');
+  });
+});
+
+describe('schema guard', () => {
+  it('keeps the hand-written unique indexes (prisma migrate diff tries to drop them)', async () => {
+    const rows = await prisma.$queryRaw<{ indexname: string }[]>`SELECT indexname FROM pg_indexes WHERE indexname IN ('time_entry_employee_engagement_date_live_key','engagement_customer_category_period_key','role_assignment_unique_scope')`;
+    expect(rows.map((r) => r.indexname).sort()).toEqual(['engagement_customer_category_period_key', 'role_assignment_unique_scope', 'time_entry_employee_engagement_date_live_key']);
   });
 });
 

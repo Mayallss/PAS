@@ -43,6 +43,101 @@ enum RateUnit {
   DAY
 }
 
+/// Legacy meet_detail.php offered "ถูกต้อง / ไม่ถูกต้อง (page, line, detail)" but only ever saved "ถูกต้อง".
+enum CertificationStatus {
+  ACCEPTED //  รายงานถูกต้อง
+  OBJECTION // ไม่ถูกต้อง — quoted passage + proposed correction
+}
+
+/// Legacy workbook "พนักงานใหม่" kept interns and directors in the same list with different code ranges.
+enum EmploymentType {
+  EMPLOYEE
+  INTERN
+  DIRECTOR
+  CONTRACTOR
+}
+
+enum AssetStatus {
+  ACTIVE //    usable — in use when it has a holder, spare ("สแป") when it has none
+  IN_REPAIR
+  BROKEN //    "ไม่พร้อมใช้งาน" — waiting for a decision
+  RETIRED //   "ไม่เหมาะกับการใช้งานปัจจุบันแล้ว" — kept, not handed out
+  DISPOSED //  sold / scrapped (final)
+  LOST
+}
+
+enum AssignmentKind {
+  PRIMARY // ใช้ประจำ
+  LOAN //    ยืมชั่วคราว (has a due date)
+  SHARED //  เครื่องส่วนกลาง at a location (server, CCTV, print share)
+}
+
+enum AssetEventType {
+  REGISTERED
+  ASSIGNED
+  RETURNED
+  STATUS_CHANGED
+  ISSUE
+  REPAIR
+  UPGRADE
+  SOFTWARE
+  INSPECTION
+  SPEC_CORRECTED
+  NOTE
+  DISPOSED
+}
+
+enum AttachmentKind {
+  RECEIPT
+  QUOTATION
+  PHOTO
+  DELIVERY_NOTE
+  WARRANTY
+  REPORT
+  OTHER
+}
+
+/// What an employee asks IT for (legacy: "สถานะผู้ใช้งาน" column + the IT Requests form).
+enum ServiceRequestType {
+  REPAIR //      แจ้งซ่อม
+  REPLACEMENT // ขอเปลี่ยนเครื่อง
+  UPGRADE //     ขออัปเกรด
+  SOFTWARE //    ติดตั้ง / แก้ไขโปรแกรม
+  DEVICE //      ขออุปกรณ์เพิ่ม (จอ, เมาส์ …)
+  OTHER
+}
+
+enum ServiceRequestStatus {
+  SUBMITTED //   ส่งแล้ว รอ IT รับเรื่อง
+  IN_PROGRESS // IT กำลังดำเนินการ
+  RESOLVED //    เสร็จแล้ว
+  REJECTED //    ไม่อนุมัติ / ทำไม่ได้
+  CANCELLED //   ผู้ขอยกเลิก
+}
+
+enum RequestUrgency {
+  NORMAL
+  URGENT
+}
+
+enum ExternalAccountStatus {
+  PENDING
+  ACTIVE
+  DISABLED
+}
+
+enum CaseKind {
+  ONBOARDING
+  OFFBOARDING
+}
+
+enum TaskStatus {
+  TODO
+  DONE
+  SKIPPED
+  NOT_APPLICABLE
+}
+
 enum AppKind {
   INTERNAL //  module of this platform
   EXTERNAL //  link to another system (monday.com, forms, …)
@@ -54,29 +149,31 @@ enum AppKind {
 // ---------------------------------------------------------------------------
 
 model OrgUnit {
-  id          String               @id @default(uuid()) @db.Uuid
-  name        String
-  parentId    String?              @map("parent_id") @db.Uuid
-  parent      OrgUnit?             @relation("OrgUnitTree", fields: [parentId], references: [id])
-  children    OrgUnit[]            @relation("OrgUnitTree")
-  managerId   String?              @map("manager_id") @db.Uuid
-  manager     Employee?            @relation("OrgUnitManager", fields: [managerId], references: [id])
-  members     Employee[]           @relation("OrgUnitMembers")
-  roleScopes  RoleAssignment[]
-  schedules   ScheduleAssignment[]
-  legacyId    Int?                 @unique @map("legacy_id")
+  id               String               @id @default(uuid()) @db.Uuid
+  name             String
+  parentId         String?              @map("parent_id") @db.Uuid
+  parent           OrgUnit?             @relation("OrgUnitTree", fields: [parentId], references: [id])
+  children         OrgUnit[]            @relation("OrgUnitTree")
+  managerId        String?              @map("manager_id") @db.Uuid
+  manager          Employee?            @relation("OrgUnitManager", fields: [managerId], references: [id])
+  members          Employee[]           @relation("OrgUnitMembers")
+  roleScopes       RoleAssignment[]
+  schedules        ScheduleAssignment[]
+  externalAccounts ExternalAccount[]
+  legacyId         Int?                 @unique @map("legacy_id")
 
   @@map("org_unit")
 }
 
 model EmployeeLevel {
-  id        String     @id @default(uuid()) @db.Uuid
-  code      String     @unique
+  id        String                 @id @default(uuid()) @db.Uuid
+  code      String                 @unique
   name      String
-  sortOrder Int        @default(0) @map("sort_order")
+  sortOrder Int                    @default(0) @map("sort_order")
   employees Employee[]
   costRates CostRate[]
-  legacyId  Int?       @unique @map("legacy_id")
+  history   EmployeeLevelHistory[]
+  legacyId  Int?                   @unique @map("legacy_id")
 
   @@map("employee_level")
 }
@@ -88,12 +185,34 @@ model CostRate {
   level         EmployeeLevel @relation(fields: [levelId], references: [id])
   amount        Decimal       @db.Decimal(12, 2)
   unit          RateUnit
+  /// DAY rates: minutes that make one day (legacy divided by 540 = 9 h). Ignored for HOUR rates.
+  minutesPerDay Int           @default(540) @map("minutes_per_day")
   effectiveFrom DateTime      @map("effective_from") @db.Date
   effectiveTo   DateTime?     @map("effective_to") @db.Date
+  createdAt     DateTime      @default(now()) @map("created_at")
 
   // No two overlapping periods per level: exclusion constraint in migration SQL.
   @@index([levelId, effectiveFrom])
   @@map("cost_rate")
+}
+
+/// Which level someone held when — so a promotion does not have to re-price past work (docs/06 Q5 follow-up).
+/// Periods are inclusive [effectiveFrom, effectiveTo] like cost_rate; no overlap per employee (migration SQL).
+/// Employee.levelId stays the current level for quick reads and is kept in sync by the API.
+model EmployeeLevelHistory {
+  id            String        @id @default(uuid()) @db.Uuid
+  employeeId    String        @map("employee_id") @db.Uuid
+  employee      Employee      @relation("LevelHistoryEmployee", fields: [employeeId], references: [id], onDelete: Cascade)
+  levelId       String        @map("level_id") @db.Uuid
+  level         EmployeeLevel @relation(fields: [levelId], references: [id])
+  effectiveFrom DateTime      @map("effective_from") @db.Date
+  effectiveTo   DateTime?     @map("effective_to") @db.Date
+  createdById   String?       @map("created_by_id") @db.Uuid
+  createdBy     Employee?     @relation("LevelHistoryAuthor", fields: [createdById], references: [id])
+  createdAt     DateTime      @default(now()) @map("created_at")
+
+  @@index([employeeId, effectiveFrom])
+  @@map("employee_level_history")
 }
 
 model Employee {
@@ -111,20 +230,77 @@ model Employee {
   levelId        String?          @map("level_id") @db.Uuid
   level          EmployeeLevel?   @relation(fields: [levelId], references: [id])
   legacyId       Int?             @unique @map("legacy_id")
+  /// รหัสพนักงาน as used by HR ("0262"; interns "1046"). Text so leading zeros survive.
+  employeeCode   String?          @unique @map("employee_code")
+  fullNameEn     String?          @map("full_name_en")
+  /// PII — returned only to employee.admin.
+  personalEmail  String?          @map("personal_email")
+  employmentType EmploymentType   @default(EMPLOYEE) @map("employment_type")
+  /// Last working day (resignation / end of internship).
+  endDate        DateTime?        @map("end_date") @db.Date
+  /// Interns: university / college.
+  institution    String?
+  departmentId   String?          @map("department_id") @db.Uuid
+  department     Department?      @relation(fields: [departmentId], references: [id])
   createdAt      DateTime         @default(now()) @map("created_at")
   updatedAt      DateTime         @updatedAt @map("updated_at")
 
-  roleAssignments RoleAssignment[]
-  schedules       ScheduleAssignment[]
-  managedUnits    OrgUnit[]        @relation("OrgUnitManager")
-  ownedCustomers  Customer[]       @relation("CustomerOwner")
-  managedEngagements Engagement[]  @relation("EngagementManager")
-  timeEntries     TimeEntry[]      @relation("EntryOwner")
-  sessions        Session[]
-  announcements   Announcement[]
-  acknowledgements AnnouncementAck[]
+  roleAssignments     RoleAssignment[]
+  schedules           ScheduleAssignment[]
+  managedUnits        OrgUnit[]              @relation("OrgUnitManager")
+  ownedCustomers      Customer[]             @relation("CustomerOwner")
+  managedEngagements  Engagement[]           @relation("EngagementManager")
+  timeEntries         TimeEntry[]            @relation("EntryOwner")
+  sessions            Session[]
+  announcements       Announcement[]
+  acknowledgements    AnnouncementAck[]
+  meetings            Meeting[]
+  meetingRevisions    MeetingRevision[]      @relation("RevisionAuthor")
+  certifications      MeetingCertification[] @relation("Certifier")
+  objectionReplies    MeetingCertification[] @relation("ObjectionReplier")
+  assetAssignments    AssetAssignment[]      @relation("AssignmentHolder")
+  assignmentsMade     AssetAssignment[]      @relation("AssignmentCreator")
+  assetEvents         AssetEvent[]           @relation("EventEmployee")
+  assetEventsRecorded AssetEvent[]           @relation("EventRecorder")
+  attachments         Attachment[]
+  externalAccounts    ExternalAccount[]
+  cases               OnboardingCase[]       @relation("CaseEmployee")
+  casesOpened         OnboardingCase[]       @relation("CaseOpener")
+  tasksDone           OnboardingTask[]
+  requestsMade        ServiceRequest[]       @relation("RequestRequester")
+  appFavorites        AppFavorite[]
+  levelHistory        EmployeeLevelHistory[] @relation("LevelHistoryEmployee")
+  levelChanges        EmployeeLevelHistory[] @relation("LevelHistoryAuthor")
+  requestsHandled     ServiceRequest[]       @relation("RequestHandler")
+  requestUpdates      ServiceRequestUpdate[]
+  todos               TodoItem[]             @relation("TodoAssignee")
+  licenseSeats        LicenseAssignment[]    @relation("SeatEmployee")
+  licenseSeatsMade    LicenseAssignment[]    @relation("SeatCreator")
+  todosCreated        TodoItem[]             @relation("TodoCreator")
+  leaveRequests       LeaveRequest[]         @relation("LeaveRequester")
+  leaveDecisions      LeaveRequest[]         @relation("LeaveDecider")
+  leaveRequestsFiled  LeaveRequest[]         @relation("LeaveFiler")
+  leaveCancellations  LeaveRequest[]         @relation("LeaveCanceller")
+  leaveEntitlements   LeaveEntitlement[]     @relation("EntitlementEmployee")
+  entitlementsSet     LeaveEntitlement[]     @relation("EntitlementSetter")
+  bookingsOrganized   RoomBooking[]          @relation("BookingOrganizer")
+  bookingsCreated     RoomBooking[]          @relation("BookingCreator")
+  bookingsCancelled   RoomBooking[]          @relation("BookingCanceller")
+  bookingInvites      RoomBookingAttendee[]
+  localCredential     LocalCredential?
 
   @@map("employee")
+}
+
+/// แผนก (บัญชี / ธุรการ / ทะเบียน / Audit / IT / HR) — a separate dimension from teams (OrgUnit).
+model Department {
+  id        String     @id @default(uuid()) @db.Uuid
+  name      String     @unique
+  sortOrder Int        @default(0) @map("sort_order")
+  isActive  Boolean    @default(true) @map("is_active")
+  employees Employee[]
+
+  @@map("department")
 }
 
 /// A named bundle of permissions. Permission keys are defined in code (apps/api/.../permissions.ts);
@@ -181,10 +357,10 @@ model Session {
 
 /// Minutes expected per ISO weekday (index 0 = Monday … 6 = Sunday).
 model WorkSchedule {
-  id              String               @id @default(uuid()) @db.Uuid
-  name            String               @unique
-  weekdayMinutes  Int[]                @map("weekday_minutes")
-  assignments     ScheduleAssignment[]
+  id             String               @id @default(uuid()) @db.Uuid
+  name           String               @unique
+  weekdayMinutes Int[]                @map("weekday_minutes")
+  assignments    ScheduleAssignment[]
 
   @@map("work_schedule")
 }
@@ -241,6 +417,7 @@ model WorkCategory {
   isActive    Boolean          @default(true) @map("is_active")
   legacyId    Int?             @unique @map("legacy_id")
   engagements Engagement[]
+  leaveType   LeaveType?
 
   @@map("work_category")
 }
@@ -262,6 +439,7 @@ model Engagement {
   managerId      String?      @map("manager_id") @db.Uuid
   manager        Employee?    @relation("EngagementManager", fields: [managerId], references: [id])
   timeEntries    TimeEntry[]
+  todos          TodoItem[]
 
   // Unique (customer, category, period_start) NULLS NOT DISTINCT: in migration SQL.
   @@index([customerId])
@@ -291,6 +469,9 @@ model TimeEntry {
   deletedAt       DateTime?       @map("deleted_at")
   deletedById     String?         @map("deleted_by_id") @db.Uuid
   legacyIds       Int[]           @default([]) @map("legacy_ids")
+  /// Posted by an approved leave request: read-only in the timesheet, changed only through the request.
+  leaveRequestId  String?         @map("leave_request_id") @db.Uuid
+  leaveRequest    LeaveRequest?   @relation(fields: [leaveRequestId], references: [id])
 
   // Partial unique index (employee, engagement, date) WHERE deleted_at IS NULL and CHECKs: in migration SQL.
   @@index([employeeId, workDate])
@@ -365,23 +546,442 @@ model AnnouncementAck {
   @@map("announcement_ack")
 }
 
+/// Monthly meeting minutes (legacy `meet`). Body is sanitised HTML (rich text, legacy CKEditor content).
+/// Every edit creates a MeetingRevision; `certifyFromVersion` is the latest version that required re-certification.
+model Meeting {
+  id                 String                 @id @default(uuid()) @db.Uuid
+  title              String                 @db.VarChar(200)
+  meetingDate        DateTime               @map("meeting_date") @db.Date
+  /// "HH:MM"
+  startTime          String?                @map("start_time") @db.VarChar(5)
+  endTime            String?                @map("end_time") @db.VarChar(5)
+  location           String?                @db.VarChar(120)
+  bodyHtml           String                 @map("body_html")
+  version            Int                    @default(1)
+  certifyFromVersion Int                    @default(1) @map("certify_from_version")
+  authorId           String                 @map("author_id") @db.Uuid
+  author             Employee               @relation(fields: [authorId], references: [id])
+  createdAt          DateTime               @default(now()) @map("created_at")
+  updatedAt          DateTime               @updatedAt @map("updated_at")
+  legacyId           Int?                   @unique @map("legacy_id")
+  revisions          MeetingRevision[]
+  certifications     MeetingCertification[]
+  bookings           RoomBooking[]
+
+  @@index([meetingDate])
+  @@map("meeting")
+}
+
+/// Immutable history of every published version (for diffs, audit and re-certification).
+model MeetingRevision {
+  meetingId               String   @map("meeting_id") @db.Uuid
+  meeting                 Meeting  @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  version                 Int
+  title                   String   @db.VarChar(200)
+  bodyHtml                String   @map("body_html")
+  /// What changed and why ("แก้ไขตามที่คุณ ก แย้ง: ...").
+  changeNote              String?  @map("change_note") @db.VarChar(1000)
+  requiresRecertification Boolean  @default(true) @map("requires_recertification")
+  authorId                String   @map("author_id") @db.Uuid
+  author                  Employee @relation("RevisionAuthor", fields: [authorId], references: [id])
+  createdAt               DateTime @default(now()) @map("created_at")
+
+  @@id([meetingId, version])
+  @@map("meeting_revision")
+}
+
+/// A person's certification of ONE version (history kept per version, legacy meet_agree).
+/// ACCEPTED = "รายงานถูกต้อง"; OBJECTION = "ไม่ถูกต้อง" with the quoted passage and the proposed correction.
+model MeetingCertification {
+  meetingId   String              @map("meeting_id") @db.Uuid
+  meeting     Meeting             @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  employeeId  String              @map("employee_id") @db.Uuid
+  employee    Employee            @relation("Certifier", fields: [employeeId], references: [id], onDelete: Cascade)
+  version     Int
+  status      CertificationStatus
+  /// The exact passage being objected to (must exist in that version's text).
+  quote       String?             @db.VarChar(1000)
+  /// What it should say / why it is wrong.
+  note        String?             @db.VarChar(2000)
+  /// Author's reply when closing an objection without (or in addition to) a new version.
+  reply       String?             @db.VarChar(1000)
+  repliedAt   DateTime?           @map("replied_at")
+  repliedById String?             @map("replied_by_id") @db.Uuid
+  repliedBy   Employee?           @relation("ObjectionReplier", fields: [repliedById], references: [id])
+  createdAt   DateTime            @default(now()) @map("created_at")
+  updatedAt   DateTime            @updatedAt @map("updated_at")
+
+  @@id([meetingId, employeeId, version])
+  @@index([meetingId, version])
+  @@map("meeting_certification")
+}
+
 /// Application launcher entries (seeded from the legacy link portal).
 model AppLink {
-  id                 String  @id @default(uuid()) @db.Uuid
-  key                String  @unique
-  name               String
-  description        String?
-  url                String?
+  id                  String        @id @default(uuid()) @db.Uuid
+  key                 String        @unique
+  name                String
+  description         String?
+  url                 String?
   /// Lucide icon name or /brand/... image path.
-  icon               String
-  kind               AppKind
-  category           String
-  /// Only shown to users holding this permission (null = everyone).
-  requiredPermission String? @map("required_permission")
-  sortOrder          Int     @default(0) @map("sort_order")
-  isActive           Boolean @default(true) @map("is_active")
+  icon                String
+  kind                AppKind
+  /// Sidebar / launcher group (งานประจำ, เอกสาร, สำนักงาน …).
+  category            String
+  /// Shown to users holding ANY of these permissions (empty = everyone).
+  requiredPermissions String[]      @default([]) @map("required_permissions")
+  /// Admin pages: listed in the sidebar's "ผู้ดูแลระบบ" section, not in the employee launcher.
+  isAdmin             Boolean       @default(false) @map("is_admin")
+  sortOrder           Int           @default(0) @map("sort_order")
+  isActive            Boolean       @default(true) @map("is_active")
+  favorites           AppFavorite[]
 
   @@map("app_link")
+}
+
+/// A user's pinned apps (sidebar "รายการโปรด"), in the order they arranged them.
+model AppFavorite {
+  employeeId String   @map("employee_id") @db.Uuid
+  employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  appLinkId  String   @map("app_link_id") @db.Uuid
+  appLink    AppLink  @relation(fields: [appLinkId], references: [id], onDelete: Cascade)
+  sortOrder  Int      @default(0) @map("sort_order")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@id([employeeId, appLinkId])
+  @@map("app_favorite")
+}
+
+// ---------------------------------------------------------------------------
+// IT Asset (replaces the monthly "สำรวจความเพียงพอของอุปกรณ์" sheet) — docs/07
+// ---------------------------------------------------------------------------
+
+/// Kind of device. Code prefix and spec fields are data, so new kinds need no code change.
+model AssetCategory {
+  id           String  @id @default(uuid()) @db.Uuid
+  key          String  @unique
+  name         String
+  /// New codes are "<prefix>-0001"; legacy codes (CEO-0001, OE348, NB-0017-1) are kept as they are.
+  codePrefix   String  @map("code_prefix")
+  /// [{ "key": "cpu", "label": "CPU" }, …] — which spec fields the form shows.
+  specFields   Json    @default("[]") @map("spec_fields")
+  /// One employee may hold only one device of these categories at a time (computers) — decision 2026-09-28.
+  onePerPerson Boolean @default(false) @map("one_per_person")
+  sortOrder    Int     @default(0) @map("sort_order")
+  isActive     Boolean @default(true) @map("is_active")
+  assets       Asset[]
+
+  @@map("asset_category")
+}
+
+model Vendor {
+  id       String            @id @default(uuid()) @db.Uuid
+  name     String            @unique
+  phone    String?
+  note     String?
+  assets   Asset[]
+  events   AssetEvent[]
+  licenses SoftwareLicense[]
+
+  @@map("vendor")
+}
+
+/// Where shared devices live (ห้อง Server, โต๊ะ Shell, ห้องพิมพ์).
+model Location {
+  id          String            @id @default(uuid()) @db.Uuid
+  name        String            @unique
+  isActive    Boolean           @default(true) @map("is_active")
+  assignments AssetAssignment[]
+
+  @@map("location")
+}
+
+model Asset {
+  id              String              @id @default(uuid()) @db.Uuid
+  /// รหัสประจำเครื่อง — never reused, even after disposal.
+  code            String              @unique
+  categoryId      String              @map("category_id") @db.Uuid
+  category        AssetCategory       @relation(fields: [categoryId], references: [id])
+  status          AssetStatus         @default(ACTIVE)
+  brand           String?
+  model           String?
+  serialNo        String?             @unique @map("serial_no")
+  /// Windows computer name — how the antivirus list identifies machines.
+  hostname        String?
+  /// Code in the accounting fixed-asset register when it differs from `code`.
+  faCode          String?             @map("fa_code")
+  /// Current specs {cpu, ram, storage, os, …}. Changed only through UPGRADE / SPEC_CORRECTED events.
+  specs           Json                @default("{}")
+  purchaseDate    DateTime?           @map("purchase_date") @db.Date
+  cost            Decimal?            @db.Decimal(12, 2)
+  usefulLifeYears Int                 @default(5) @map("useful_life_years")
+  warrantyUntil   DateTime?           @map("warranty_until") @db.Date
+  vendorId        String?             @map("vendor_id") @db.Uuid
+  vendor          Vendor?             @relation(fields: [vendorId], references: [id])
+  notes           String?
+  version         Int                 @default(1)
+  createdAt       DateTime            @default(now()) @map("created_at")
+  updatedAt       DateTime            @updatedAt @map("updated_at")
+  assignments     AssetAssignment[]
+  events          AssetEvent[]
+  attachments     Attachment[]
+  requests        ServiceRequest[]
+  licenseSeats    LicenseAssignment[]
+
+  @@index([categoryId, status])
+  @@map("asset")
+}
+
+/// Who holds a device, half-open [startDate, endDate): endDate is the day it was handed back.
+/// Exactly one holder (employee XOR location); periods of one asset never overlap (constraints in migration SQL).
+model AssetAssignment {
+  id          String           @id @default(uuid()) @db.Uuid
+  assetId     String           @map("asset_id") @db.Uuid
+  asset       Asset            @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  employeeId  String?          @map("employee_id") @db.Uuid
+  employee    Employee?        @relation("AssignmentHolder", fields: [employeeId], references: [id])
+  locationId  String?          @map("location_id") @db.Uuid
+  location    Location?        @relation(fields: [locationId], references: [id])
+  kind        AssignmentKind
+  startDate   DateTime         @map("start_date") @db.Date
+  endDate     DateTime?        @map("end_date") @db.Date
+  /// LOAN only: when it should come back.
+  dueDate     DateTime?        @map("due_date") @db.Date
+  /// Imported from the monthly sheet — only the month is known.
+  approximate Boolean          @default(false)
+  note        String?
+  createdById String           @map("created_by_id") @db.Uuid
+  createdBy   Employee         @relation("AssignmentCreator", fields: [createdById], references: [id])
+  createdAt   DateTime         @default(now()) @map("created_at")
+  tasks       OnboardingTask[]
+
+  @@index([assetId, startDate])
+  @@index([employeeId])
+  @@map("asset_assignment")
+}
+
+/// Life history of a device. Assignment/status events are written by the system so one timeline tells everything.
+/// Never deleted — a wrong entry is voided with a reason.
+model AssetEvent {
+  id               String           @id @default(uuid()) @db.Uuid
+  assetId          String           @map("asset_id") @db.Uuid
+  asset            Asset            @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  type             AssetEventType
+  /// When it really happened (may be back-dated); `recordedAt` is when it was typed in.
+  occurredOn       DateTime         @map("occurred_on") @db.Date
+  /// REPAIR: the day the device came back.
+  completedOn      DateTime?        @map("completed_on") @db.Date
+  title            String
+  detail           String?
+  /// {"storage": ["HDD 500 GB", "SSD 512 GB"]} — before/after of every changed spec field.
+  specDiff         Json?            @map("spec_diff")
+  fromStatus       AssetStatus?     @map("from_status")
+  toStatus         AssetStatus?     @map("to_status")
+  cost             Decimal?         @db.Decimal(12, 2)
+  vendorId         String?          @map("vendor_id") @db.Uuid
+  vendor           Vendor?          @relation(fields: [vendorId], references: [id])
+  underWarranty    Boolean?         @map("under_warranty")
+  /// Person involved (reporter of an issue, receiver of the device).
+  employeeId       String?          @map("employee_id") @db.Uuid
+  employee         Employee?        @relation("EventEmployee", fields: [employeeId], references: [id])
+  recordedById     String           @map("recorded_by_id") @db.Uuid
+  recordedBy       Employee         @relation("EventRecorder", fields: [recordedById], references: [id])
+  recordedAt       DateTime         @default(now()) @map("recorded_at")
+  voidedAt         DateTime?        @map("voided_at")
+  voidReason       String?          @map("void_reason")
+  /// The employee request this entry came from (ISSUE on submit, REPAIR when IT sends it to repair).
+  serviceRequestId String?          @map("service_request_id") @db.Uuid
+  serviceRequest   ServiceRequest?  @relation("RequestEvents", fields: [serviceRequestId], references: [id])
+  attachments      Attachment[]
+  repairOf         ServiceRequest[] @relation("RequestRepair")
+
+  @@index([assetId, occurredOn])
+  @@map("asset_event")
+}
+
+/// Evidence file (receipt, photo, quotation …). Bytes live in object storage; never deleted, only voided.
+/// Belongs to a device, to an employee request, or both (a photo sent with a repair request).
+model Attachment {
+  id               String          @id @default(uuid()) @db.Uuid
+  assetId          String?         @map("asset_id") @db.Uuid
+  asset            Asset?          @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  serviceRequestId String?         @map("service_request_id") @db.Uuid
+  serviceRequest   ServiceRequest? @relation(fields: [serviceRequestId], references: [id], onDelete: Cascade)
+  assetEventId     String?         @map("asset_event_id") @db.Uuid
+  assetEvent       AssetEvent?     @relation(fields: [assetEventId], references: [id])
+  kind             AttachmentKind
+  fileName         String          @map("file_name")
+  mimeType         String          @map("mime_type")
+  sizeBytes        Int             @map("size_bytes")
+  sha256           String
+  storageKey       String          @unique @map("storage_key")
+  uploadedById     String          @map("uploaded_by_id") @db.Uuid
+  uploadedBy       Employee        @relation(fields: [uploadedById], references: [id])
+  uploadedAt       DateTime        @default(now()) @map("uploaded_at")
+  voidedAt         DateTime?       @map("voided_at")
+  voidReason       String?         @map("void_reason")
+
+  @@index([assetId])
+  @@index([serviceRequestId])
+  @@map("attachment")
+}
+
+/// Employee → IT request (repair, replacement, software …) with its own progress log.
+model ServiceRequest {
+  id            String                 @id @default(uuid()) @db.Uuid
+  /// Human-friendly running number shown as "REQ-0042".
+  number        Int                    @unique @default(autoincrement())
+  type          ServiceRequestType
+  status        ServiceRequestStatus   @default(SUBMITTED)
+  urgency       RequestUrgency         @default(NORMAL)
+  assetId       String?                @map("asset_id") @db.Uuid
+  asset         Asset?                 @relation(fields: [assetId], references: [id])
+  requesterId   String                 @map("requester_id") @db.Uuid
+  requester     Employee               @relation("RequestRequester", fields: [requesterId], references: [id])
+  title         String
+  detail        String?
+  handlerId     String?                @map("handler_id") @db.Uuid
+  handler       Employee?              @relation("RequestHandler", fields: [handlerId], references: [id])
+  /// The REPAIR history entry opened when IT sent the device to repair for this request.
+  repairEventId String?                @map("repair_event_id") @db.Uuid
+  repairEvent   AssetEvent?            @relation("RequestRepair", fields: [repairEventId], references: [id])
+  resolution    String?
+  closedAt      DateTime?              @map("closed_at")
+  createdAt     DateTime               @default(now()) @map("created_at")
+  updatedAt     DateTime               @updatedAt @map("updated_at")
+  updates       ServiceRequestUpdate[]
+  attachments   Attachment[]
+  events        AssetEvent[]           @relation("RequestEvents")
+
+  @@index([status, createdAt])
+  @@index([requesterId])
+  @@index([assetId])
+  @@map("service_request")
+}
+
+/// Progress log of a request — what the requester sees ("IT รับเรื่องแล้ว", "ส่งซ่อมร้าน …").
+model ServiceRequestUpdate {
+  id         String                @id @default(uuid()) @db.Uuid
+  requestId  String                @map("request_id") @db.Uuid
+  request    ServiceRequest        @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  fromStatus ServiceRequestStatus? @map("from_status")
+  toStatus   ServiceRequestStatus  @map("to_status")
+  note       String?
+  byId       String                @map("by_id") @db.Uuid
+  by         Employee              @relation(fields: [byId], references: [id])
+  createdAt  DateTime              @default(now()) @map("created_at")
+
+  @@index([requestId, createdAt])
+  @@map("service_request_update")
+}
+
+// ---------------------------------------------------------------------------
+// Onboarding & accounts in other systems (replaces the "พนักงานใหม่" workbook) — docs/07
+// ---------------------------------------------------------------------------
+
+/// Email PAS, TRCloud, Xerox, scan folder, Map Drive … — systems whose accounts IT hands out.
+model ExternalSystem {
+  id               String                   @id @default(uuid()) @db.Uuid
+  key              String                   @unique
+  name             String
+  /// What the identifier is called in this system ("อีเมล", "User ID").
+  identifierLabel  String                   @map("identifier_label")
+  /// Two live accounts may not share an identifier (e.g. Xerox User ID).
+  identifierUnique Boolean                  @default(true) @map("identifier_unique")
+  sortOrder        Int                      @default(0) @map("sort_order")
+  isActive         Boolean                  @default(true) @map("is_active")
+  accounts         ExternalAccount[]
+  templateItems    OnboardingTemplateItem[]
+
+  @@map("external_system")
+}
+
+/// An account someone has in another system. Deliberately has no password column (docs/07 §2).
+model ExternalAccount {
+  id          String                @id @default(uuid()) @db.Uuid
+  systemId    String                @map("system_id") @db.Uuid
+  system      ExternalSystem        @relation(fields: [systemId], references: [id])
+  /// Personal account …
+  employeeId  String?               @map("employee_id") @db.Uuid
+  employee    Employee?             @relation(fields: [employeeId], references: [id])
+  /// … or an account shared by a team (Map Drive team01). Exactly one of the two.
+  orgUnitId   String?               @map("org_unit_id") @db.Uuid
+  orgUnit     OrgUnit?              @relation(fields: [orgUnitId], references: [id])
+  identifier  String
+  status      ExternalAccountStatus @default(ACTIVE)
+  activatedOn DateTime?             @map("activated_on") @db.Date
+  disabledOn  DateTime?             @map("disabled_on") @db.Date
+  note        String?
+  createdAt   DateTime              @default(now()) @map("created_at")
+  updatedAt   DateTime              @updatedAt @map("updated_at")
+  tasks       OnboardingTask[]
+
+  @@index([employeeId])
+  @@map("external_account")
+}
+
+/// Checklist template (columns of the legacy workbook). Editable data.
+model OnboardingTemplateItem {
+  id            String           @id @default(uuid()) @db.Uuid
+  kind          CaseKind
+  key           String           @unique
+  title         String
+  description   String?
+  /// Completing this task records an account in this system.
+  systemId      String?          @map("system_id") @db.Uuid
+  system        ExternalSystem?  @relation(fields: [systemId], references: [id])
+  /// Completing this task hands out a device.
+  requiresAsset Boolean          @default(false) @map("requires_asset")
+  /// Days after the start date ("หลังจาก 3 สัปดาห์ส่ง Email, TRC, Scan" = 21).
+  dueOffsetDays Int              @default(0) @map("due_offset_days")
+  /// Empty = every employment type.
+  appliesTo     EmploymentType[] @map("applies_to")
+  sortOrder     Int              @default(0) @map("sort_order")
+  isActive      Boolean          @default(true) @map("is_active")
+  tasks         OnboardingTask[]
+
+  @@map("onboarding_template_item")
+}
+
+model OnboardingCase {
+  id         String           @id @default(uuid()) @db.Uuid
+  employeeId String           @map("employee_id") @db.Uuid
+  employee   Employee         @relation("CaseEmployee", fields: [employeeId], references: [id])
+  kind       CaseKind
+  openedOn   DateTime         @map("opened_on") @db.Date
+  closedOn   DateTime?        @map("closed_on") @db.Date
+  openedById String           @map("opened_by_id") @db.Uuid
+  openedBy   Employee         @relation("CaseOpener", fields: [openedById], references: [id])
+  createdAt  DateTime         @default(now()) @map("created_at")
+  tasks      OnboardingTask[]
+
+  @@index([employeeId])
+  @@map("onboarding_case")
+}
+
+model OnboardingTask {
+  id                String                  @id @default(uuid()) @db.Uuid
+  caseId            String                  @map("case_id") @db.Uuid
+  case              OnboardingCase          @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  templateItemId    String?                 @map("template_item_id") @db.Uuid
+  templateItem      OnboardingTemplateItem? @relation(fields: [templateItemId], references: [id])
+  /// Snapshot of the template title (templates may change later).
+  title             String
+  dueDate           DateTime                @map("due_date") @db.Date
+  status            TaskStatus              @default(TODO)
+  externalAccountId String?                 @map("external_account_id") @db.Uuid
+  externalAccount   ExternalAccount?        @relation(fields: [externalAccountId], references: [id])
+  assignmentId      String?                 @map("assignment_id") @db.Uuid
+  assignment        AssetAssignment?        @relation(fields: [assignmentId], references: [id])
+  doneById          String?                 @map("done_by_id") @db.Uuid
+  doneBy            Employee?               @relation(fields: [doneById], references: [id])
+  doneAt            DateTime?               @map("done_at")
+  note              String?
+  sortOrder         Int                     @default(0) @map("sort_order")
+
+  @@index([caseId])
+  @@index([status, dueDate])
+  @@map("onboarding_task")
 }
 
 // ---------------------------------------------------------------------------
@@ -405,4 +1005,409 @@ model AuditEvent {
   @@index([resourceType, resourceId])
   @@index([actorId, occurredAt])
   @@map("audit_event")
+}
+
+// ---------------------------------------------------------------------------
+// Work plan (To-do) = estimate. Actual time = time_entry.
+// ---------------------------------------------------------------------------
+
+/// Legacy todolist_table status 1–4 → IN_PROGRESS / DONE / (late: derived, not stored) / CANCELLED.
+enum TodoStatus {
+  PLANNED
+  IN_PROGRESS
+  DONE
+  CANCELLED
+}
+
+/// Legacy priority_activity 1–4 (ต่ำ / ปานกลาง / สูง / สำคัญมาก).
+enum TodoPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+/// Planned work for one person on one day. Compared with time_entry by (employee, engagement, date);
+/// never copied automatically (legacy copydata.php made plan == actual, so estimates were lost).
+/// "Late" = not DONE/CANCELLED and work_date < today — derived, so no nightly job can get it wrong.
+/// Custom items (no engagement, free-text title) are personal notes: never counted in planned hours,
+/// estimates, cost or team views, and visible only to the assignee and whoever created them.
+model TodoItem {
+  id             String       @id @default(uuid()) @db.Uuid
+  employeeId     String       @map("employee_id") @db.Uuid
+  employee       Employee     @relation("TodoAssignee", fields: [employeeId], references: [id])
+  engagementId   String?      @map("engagement_id") @db.Uuid
+  engagement     Engagement?  @relation(fields: [engagementId], references: [id], onDelete: Restrict)
+  /// Free text for custom items (engagement_id IS NULL).
+  title          String?
+  workDate       DateTime     @map("work_date") @db.Date
+  /// Required for engagement items; optional for custom items.
+  plannedMinutes Int?         @map("planned_minutes")
+  note           String?
+  priority       TodoPriority @default(MEDIUM)
+  status         TodoStatus   @default(PLANNED)
+  completedAt    DateTime?    @map("completed_at")
+  createdById    String       @map("created_by_id") @db.Uuid
+  createdBy      Employee     @relation("TodoCreator", fields: [createdById], references: [id])
+  createdAt      DateTime     @default(now()) @map("created_at")
+  updatedAt      DateTime     @updatedAt @map("updated_at")
+  version        Int          @default(1)
+  deletedAt      DateTime?    @map("deleted_at")
+
+  @@index([employeeId, workDate])
+  @@index([engagementId, workDate])
+  @@map("todo_item")
+}
+
+// ---------------------------------------------------------------------------
+// Software & licences (docs/07 Phase 2): what runs on each machine, under which entitlement
+// ---------------------------------------------------------------------------
+
+/// How the entitlement was obtained.
+enum LicenseType {
+  SUBSCRIPTION // มีวันหมดอายุ ต้องต่ออายุ (ESET)
+  PERPETUAL //    ซื้อขาด
+  OEM //          มากับเครื่อง (Windows ที่ติดมากับ Notebook)
+  FREE //         ฟรี / ไม่ต้องมีไลเซนส์ (บันทึกไว้เพื่อรู้ว่าเครื่องไหนใช้อะไร)
+  TRIAL
+  OTHER
+}
+
+/// What one seat is attached to.
+enum LicenseMetric {
+  PER_DEVICE // 1 seat = 1 เครื่อง
+  PER_USER //   1 seat = 1 คน (ผูกผู้ใช้ภายหลัง)
+  SITE //       ใช้ได้ทั้งองค์กร ไม่จำกัดจำนวน
+  CONCURRENT // จำกัดจำนวนที่ใช้พร้อมกัน — บันทึกเครื่องที่ติดตั้งไว้
+}
+
+/// Catalogue: ESET, Windows, Microsoft Office, Expass, โปรแกรม Shell …
+model Software {
+  id        String            @id @default(uuid()) @db.Uuid
+  name      String            @unique
+  publisher String?
+  /// Free text so new kinds need no code change (แอนตี้ไวรัส, ระบบปฏิบัติการ, Office, โปรแกรมบัญชี …).
+  category  String?
+  website   String?
+  notes     String?
+  isActive  Boolean           @default(true) @map("is_active")
+  createdAt DateTime          @default(now()) @map("created_at")
+  licenses  SoftwareLicense[]
+
+  @@map("software")
+}
+
+/// One entitlement / purchase, e.g. "ESET 2026–2027 Lot 1". Renewal = a new row linked by renewedFromId,
+/// so every year keeps its own seats and history.
+model SoftwareLicense {
+  id            String              @id @default(uuid()) @db.Uuid
+  softwareId    String              @map("software_id") @db.Uuid
+  software      Software            @relation(fields: [softwareId], references: [id])
+  name          String
+  edition       String?
+  type          LicenseType
+  metric        LicenseMetric       @default(PER_DEVICE)
+  /// null = unlimited (SITE / FREE).
+  seats         Int?
+  startDate     DateTime?           @map("start_date") @db.Date
+  /// null = does not expire.
+  endDate       DateTime?           @map("end_date") @db.Date
+  autoRenew     Boolean             @default(false) @map("auto_renew")
+  cost          Decimal?            @db.Decimal(12, 2)
+  vendorId      String?             @map("vendor_id") @db.Uuid
+  vendor        Vendor?             @relation(fields: [vendorId], references: [id])
+  /// PO / invoice / order / lot number.
+  reference     String?
+  /// Last characters of the key only — the full key is never stored here (say where it is kept in notes).
+  keyHint       String?             @map("key_hint")
+  /// Any extra fields per licence ({"account": "it@…", "portal": "ESET Business Account"}).
+  attributes    Json                @default("{}")
+  notes         String?
+  renewedFromId String?             @unique @map("renewed_from_id") @db.Uuid
+  renewedFrom   SoftwareLicense?    @relation("LicenseRenewal", fields: [renewedFromId], references: [id])
+  renewedBy     SoftwareLicense?    @relation("LicenseRenewal")
+  archivedAt    DateTime?           @map("archived_at")
+  version       Int                 @default(1)
+  createdAt     DateTime            @default(now()) @map("created_at")
+  updatedAt     DateTime            @updatedAt @map("updated_at")
+  assignments   LicenseAssignment[]
+
+  @@index([softwareId])
+  @@index([endDate])
+  @@map("software_license")
+}
+
+/// One seat of a licence: a machine (or, later, a person) uses the software under this licence.
+/// Ending a seat (endDate) keeps the history; an active seat has endDate = null.
+model LicenseAssignment {
+  id          String          @id @default(uuid()) @db.Uuid
+  licenseId   String          @map("license_id") @db.Uuid
+  license     SoftwareLicense @relation(fields: [licenseId], references: [id])
+  assetId     String?         @map("asset_id") @db.Uuid
+  asset       Asset?          @relation(fields: [assetId], references: [id])
+  employeeId  String?         @map("employee_id") @db.Uuid
+  employee    Employee?       @relation("SeatEmployee", fields: [employeeId], references: [id])
+  /// Seat allocated from.
+  startDate   DateTime        @map("start_date") @db.Date
+  endDate     DateTime?       @map("end_date") @db.Date
+  /// When it was actually installed/activated; null = seat reserved, not installed yet.
+  installedOn DateTime?       @map("installed_on") @db.Date
+  /// Name the vendor console shows for this seat (ESET computer name), when it differs from the asset code.
+  seatLabel   String?         @map("seat_label")
+  note        String?
+  createdById String          @map("created_by_id") @db.Uuid
+  createdBy   Employee        @relation("SeatCreator", fields: [createdById], references: [id])
+  createdAt   DateTime        @default(now()) @map("created_at")
+
+  @@index([licenseId])
+  @@index([assetId])
+  @@index([employeeId])
+  @@map("license_assignment")
+}
+
+// ---------------------------------------------------------------------------
+// HR: leave (docs/09). Approved leave is posted into the timesheet on the legacy leave activities.
+// ---------------------------------------------------------------------------
+
+enum LeaveUnit {
+  DAYS //  every working day in [startDate, endDate], each at that day's required minutes
+  HOURS // part of one day
+}
+
+enum LeaveRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
+model LeaveType {
+  id                  String             @id @default(uuid()) @db.Uuid
+  key                 String             @unique
+  name                String
+  /// The LEAVE activity approved leave is posted to (legacy job_table 34/35/36).
+  workCategoryId      String             @unique @map("work_category_id") @db.Uuid
+  workCategory        WorkCategory       @relation(fields: [workCategoryId], references: [id])
+  /// Default entitlement per calendar year; null = no quota (recorded only).
+  annualMinutes       Int?               @map("annual_minutes")
+  /// Months of service before the default entitlement applies (annual leave: 12, LPA s.30).
+  minTenureMonths     Int                @default(0) @map("min_tenure_months")
+  paid                Boolean            @default(true)
+  allowHours          Boolean            @default(true) @map("allow_hours")
+  /// Ask for a medical certificate from this many working days (sick leave: 3, LPA s.32).
+  certificateFromDays Int?               @map("certificate_from_days")
+  /// Empty = every employment type.
+  appliesTo           EmploymentType[]   @map("applies_to")
+  /// Where the default comes from ([กฎหมาย] / [ข้อเสนอ] / [ระบบเดิม]).
+  source              String?
+  color               String?
+  sortOrder           Int                @default(0) @map("sort_order")
+  isActive            Boolean            @default(true) @map("is_active")
+  entitlements        LeaveEntitlement[]
+  requests            LeaveRequest[]
+
+  @@map("leave_type")
+}
+
+/// HR override of the default entitlement for one person, one type, one calendar year.
+model LeaveEntitlement {
+  id          String    @id @default(uuid()) @db.Uuid
+  employeeId  String    @map("employee_id") @db.Uuid
+  employee    Employee  @relation("EntitlementEmployee", fields: [employeeId], references: [id])
+  leaveTypeId String    @map("leave_type_id") @db.Uuid
+  leaveType   LeaveType @relation(fields: [leaveTypeId], references: [id])
+  year        Int
+  minutes     Int
+  note        String?
+  setById     String    @map("set_by_id") @db.Uuid
+  setBy       Employee  @relation("EntitlementSetter", fields: [setById], references: [id])
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  @@unique([employeeId, leaveTypeId, year])
+  @@map("leave_entitlement")
+}
+
+model LeaveRequest {
+  id               String             @id @default(uuid()) @db.Uuid
+  employeeId       String             @map("employee_id") @db.Uuid
+  employee         Employee           @relation("LeaveRequester", fields: [employeeId], references: [id])
+  leaveTypeId      String             @map("leave_type_id") @db.Uuid
+  leaveType        LeaveType          @relation(fields: [leaveTypeId], references: [id])
+  unit             LeaveUnit
+  startDate        DateTime           @map("start_date") @db.Date
+  endDate          DateTime           @map("end_date") @db.Date
+  /// Total charged (sum of the days).
+  minutes          Int
+  reason           String             @db.VarChar(500)
+  status           LeaveRequestStatus @default(PENDING)
+  /// Above the remaining entitlement when filed: shown to the approver, not blocked (sick leave beyond 30 days is lawful, unpaid).
+  overQuota        Boolean            @default(false) @map("over_quota")
+  /// HR has the medical certificate (types with certificateFromDays).
+  documentReceived Boolean            @default(false) @map("document_received")
+  decidedById      String?            @map("decided_by_id") @db.Uuid
+  decidedBy        Employee?          @relation("LeaveDecider", fields: [decidedById], references: [id])
+  decidedAt        DateTime?          @map("decided_at")
+  decisionNote     String?            @map("decision_note") @db.VarChar(500)
+  cancelledById    String?            @map("cancelled_by_id") @db.Uuid
+  cancelledBy      Employee?          @relation("LeaveCanceller", fields: [cancelledById], references: [id])
+  cancelledAt      DateTime?          @map("cancelled_at")
+  cancelReason     String?            @map("cancel_reason") @db.VarChar(500)
+  /// The requester, or HR recording leave on someone's behalf.
+  createdById      String             @map("created_by_id") @db.Uuid
+  createdBy        Employee           @relation("LeaveFiler", fields: [createdById], references: [id])
+  version          Int                @default(1)
+  createdAt        DateTime           @default(now()) @map("created_at")
+  updatedAt        DateTime           @updatedAt @map("updated_at")
+  days             LeaveDay[]
+  timeEntries      TimeEntry[]
+
+  @@index([employeeId, startDate])
+  @@index([status])
+  @@map("leave_request")
+}
+
+/// One working day of a request (a request may cross a year boundary, so usage is counted per day).
+model LeaveDay {
+  id        String       @id @default(uuid()) @db.Uuid
+  requestId String       @map("request_id") @db.Uuid
+  request   LeaveRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  date      DateTime     @db.Date
+  minutes   Int
+
+  @@unique([requestId, date])
+  @@index([date])
+  @@map("leave_day")
+}
+
+// ---------------------------------------------------------------------------
+// Meeting rooms (docs/09). Mirrored to Google Calendar once connected (calendar_sync).
+// ---------------------------------------------------------------------------
+
+enum BookingMode {
+  ONSITE // a room at the office
+  ONLINE // a meeting link only
+  HYBRID // a room + a link
+}
+
+enum BookingStatus {
+  CONFIRMED
+  CANCELLED
+}
+
+model MeetingRoom {
+  id                  String        @id @default(uuid()) @db.Uuid
+  name                String        @unique
+  location            String?
+  capacity            Int?
+  features            String[]      @default([])
+  /// Google Workspace resource calendar (...@resource.calendar.google.com) once rooms exist in Workspace.
+  googleResourceEmail String?       @unique @map("google_resource_email")
+  color               String?
+  sortOrder           Int           @default(0) @map("sort_order")
+  isActive            Boolean       @default(true) @map("is_active")
+  note                String?
+  bookings            RoomBooking[]
+
+  @@map("meeting_room")
+}
+
+model RoomBooking {
+  id            String                @id @default(uuid()) @db.Uuid
+  title         String                @db.VarChar(200)
+  mode          BookingMode
+  roomId        String?               @map("room_id") @db.Uuid
+  room          MeetingRoom?          @relation(fields: [roomId], references: [id])
+  startsAt      DateTime              @map("starts_at") @db.Timestamptz(3)
+  endsAt        DateTime              @map("ends_at") @db.Timestamptz(3)
+  organizerId   String                @map("organizer_id") @db.Uuid
+  organizer     Employee              @relation("BookingOrganizer", fields: [organizerId], references: [id])
+  description   String?               @db.VarChar(2000)
+  /// Online link: typed in today; filled from Google Meet once Calendar sync is on.
+  meetingUrl    String?               @map("meeting_url") @db.VarChar(500)
+  status        BookingStatus         @default(CONFIRMED)
+  cancelledAt   DateTime?             @map("cancelled_at")
+  cancelledById String?               @map("cancelled_by_id") @db.Uuid
+  cancelledBy   Employee?             @relation("BookingCanceller", fields: [cancelledById], references: [id])
+  cancelReason  String?               @map("cancel_reason") @db.VarChar(500)
+  /// Minutes of this meeting (รายงานการประชุม), once written.
+  meetingId     String?               @map("meeting_id") @db.Uuid
+  meeting       Meeting?              @relation(fields: [meetingId], references: [id])
+  createdById   String                @map("created_by_id") @db.Uuid
+  createdBy     Employee              @relation("BookingCreator", fields: [createdById], references: [id])
+  version       Int                   @default(1)
+  createdAt     DateTime              @default(now()) @map("created_at")
+  updatedAt     DateTime              @updatedAt @map("updated_at")
+  attendees     RoomBookingAttendee[]
+
+  // EXCLUDE (no overlap per room while CONFIRMED) and CHECKs: in migration SQL.
+  @@index([startsAt])
+  @@index([roomId, startsAt])
+  @@map("room_booking")
+}
+
+model RoomBookingAttendee {
+  id         String      @id @default(uuid()) @db.Uuid
+  bookingId  String      @map("booking_id") @db.Uuid
+  booking    RoomBooking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  /// A colleague ...
+  employeeId String?     @map("employee_id") @db.Uuid
+  employee   Employee?   @relation(fields: [employeeId], references: [id])
+  /// ... or a guest by e-mail (customers). Exactly one of the two.
+  email      String?
+
+  @@unique([bookingId, employeeId])
+  @@unique([bookingId, email])
+  @@map("room_booking_attendee")
+}
+
+// ---------------------------------------------------------------------------
+// Calendar sync outbox: one row per thing mirrored to Google Calendar, holding where it was written.
+// Every change sets PENDING; the worker pushes the CURRENT state (create / update / delete).
+// ---------------------------------------------------------------------------
+
+enum CalendarSyncStatus {
+  PENDING
+  DONE
+  FAILED
+}
+
+model CalendarSync {
+  id            String             @id @default(uuid()) @db.Uuid
+  /// 'room_booking' | 'leave_request'
+  kind          String
+  resourceId    String             @map("resource_id") @db.Uuid
+  status        CalendarSyncStatus @default(PENDING)
+  /// Google calendar + event the resource was written to (needed to update / delete it later).
+  calendarId    String?            @map("calendar_id")
+  externalId    String?            @map("external_id")
+  attempts      Int                @default(0)
+  lastError     String?            @map("last_error")
+  nextAttemptAt DateTime           @default(now()) @map("next_attempt_at")
+  syncedAt      DateTime?          @map("synced_at")
+  updatedAt     DateTime           @updatedAt @map("updated_at")
+
+  @@unique([kind, resourceId])
+  @@index([status, nextAttemptAt])
+  @@map("calendar_sync")
+}
+
+/// Username + password sign-in (user decision 2026-10-02: the portal must work without Google). Only a slow hash is
+/// stored (scrypt). The employee sets the password through a one-time link — administrators never see or set it.
+/// Legacy MD5 passwords are never migrated.
+model LocalCredential {
+  employeeId        String    @id @map("employee_id") @db.Uuid
+  employee          Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  /// Lower-case; defaults to the legacy Time Report username.
+  username          String    @unique
+  passwordHash      String?   @map("password_hash")
+  /// SHA-256 of the one-time set-password token — the token itself exists only in the link.
+  setupTokenHash    String?   @unique @map("setup_token_hash")
+  setupExpiresAt    DateTime? @map("setup_expires_at")
+  failedAttempts    Int       @default(0) @map("failed_attempts")
+  lockedUntil       DateTime? @map("locked_until")
+  passwordChangedAt DateTime? @map("password_changed_at")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+
+  @@map("local_credential")
 }

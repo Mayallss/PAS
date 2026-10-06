@@ -18,7 +18,7 @@
 | Path | หน้าที่ | ขอบเขต Phase 1 |
 |---|---|---|
 | `/` → `/pas-frontweb/` | เว็บไซต์บริษัท (Public, TH/EN) | นอกขอบเขต (Public Portal แยกภายหลัง) |
-| `/link/` | Link Portal ภายใน: ลิงก์ไป Time Report, monday.com boards, The Inventory, Microsoft Forms/Workflow (`wkf.ms`), ระบบ IT ภายใน (`192.168.10.254`) | **ต้นแบบของ Homepage / Application Launcher** |
+| `/link/` | Link Portal ภายใน: ลิงก์ไป Time Report, monday.com boards, The Inventory, แบบฟอร์ม monday.com WorkForms (`wkf.ms`), AppSheet, ระบบ IT ภายใน (`192.168.10.254`) | **ต้นแบบของ Homepage / Application Launcher** — ย้ายครบ 12 ลิงก์แล้ว |
 | `/report/` | **Time Report** + รายงานการประชุมประจำเดือน | **Phase 1B** |
 | `/report-TEST/` | สำเนา Time Report สำหรับทดสอบ (ใช้ Production DB!) | Deprecate |
 | `/document/` | ระบบติดตามเอกสาร/ส่งเอกสาร (DB `pasacccom_document`) | Future: Document Center |
@@ -50,7 +50,7 @@ MySQL/MariaDB  pasacccom_report  (MyISAM + InnoDB, utf8, no foreign keys)
 | Authorization | ตรวจเฉพาะระดับหน้า (Dreamweaver `isAuthorized`) — ไม่ตรวจระดับ Resource/ข้อมูล, 15 ไฟล์ไม่ตรวจเลย |
 | Export | PhpSpreadsheet (`list_export.php`) — ไม่พบ PDF export ใน Time Report |
 | Notifications | เดิม LINE Notify (ปิดบริการแล้ว) → ปัจจุบัน n8n Cloud เรียก `pas-report-api.php` |
-| Integrations | monday.com webhooks, n8n Cloud, Microsoft Forms/Workflow (ผ่านลิงก์เท่านั้น) |
+| Integrations | monday.com webhooks และ WorkForms (`wkf.ms`), n8n Cloud, AppSheet (ผ่านลิงก์เท่านั้น) |
 | File storage | ไม่มีใน Time Report |
 | Audit | ไม่มี (มีเพียง `date_create` ของรายการ, `company_who_edit` ของลูกค้า) |
 | Tests | ไม่มี |
@@ -146,3 +146,12 @@ MySQL/MariaDB  pasacccom_report  (MyISAM + InnoDB, utf8, no foreign keys)
 - Role 1–4 ได้สิทธิ์ **เท่ากันเกือบทั้งหมด** — ไม่มีการแยกขอบเขตข้อมูลตามทีม: MANAGER เห็นข้อมูลทุกคน
 - IT (11 บัญชี) มีสิทธิ์เห็นอัตราค่าแรงและต้นทุนลูกค้า — ขัดหลัก Least privilege
 - ไม่มีการแยก "ผู้อนุมัติ" เพราะระบบไม่มี Approval
+
+## 7. รายงานการประชุม (`meet`, `meet_agree`) — พบเพิ่มภายหลัง [ยืนยันแล้ว]
+
+- 116 รายงาน (2016–2026) เนื้อหาเป็น HTML จาก CKEditor (75 ฉบับมีตาราง/รายการ) เฉลี่ย 4.7 KB
+- `meet_detail.php` มีฟอร์ม “รับรองรายงานการประชุม”: **ถูกต้อง** หรือ **ไม่ถูกต้อง** (หน้าที่แก้ไข / บรรทัดที่ / รายละเอียด)
+- **บั๊กระบบเดิม:** Server บันทึกเฉพาะกรณี “ถูกต้อง” — กรณี “ไม่ถูกต้อง” ถูกทิ้งเงียบ ๆ → ใน 3,067 การรับรองมี “ไม่ถูกต้อง” เพียง 1 รายการ
+- ไม่มีการแก้ไขเป็นฉบับใหม่ / ไม่มีการแจ้งให้รับรองใหม่เมื่อรายงานถูกแก้
+- `activity_manage.php` / `report_activity.php` (ชื่อชวนเข้าใจผิด) = หน้าจัดการ/รายงานของ `meet` ไม่ใช่ Activity ของ Time Report
+- “Activity” ใน Time Report = `job_table` (ประเภทงาน) + `activity_list_table` (Activity ที่เปิดให้แต่ละลูกค้า/JOB)

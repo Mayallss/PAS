@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, HttpCode, Param, ParseUUIDPipe, Put, Query, Req } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, Param, ParseUUIDPipe, Post, Put, Query, Req } from '@nestjs/common';
 import { z } from 'zod';
 import { isIsoDate, isIsoMonth, todayIn } from '../../common/dates';
 import type { AppRequest } from '../../common/request-context';
@@ -26,6 +26,23 @@ const upsertBody = z
   })
   .strict();
 const deleteQuery = z.object({ version: z.coerce.number().int().positive() });
+const fillBody = z
+  .object({
+    items: z
+      .array(
+        z
+          .object({
+            engagementId: z.string().uuid(),
+            workDate: z.string().refine(isIsoDate, 'ต้องเป็นวันที่ YYYY-MM-DD'),
+            durationMinutes: z.number().int().positive(),
+            description: z.string().max(500).nullish(),
+          })
+          .strict(),
+      )
+      .min(1)
+      .max(60),
+  })
+  .strict();
 const weekQuery = z.object({ weekOf: z.string().refine(isIsoDate).optional() });
 
 @Controller('time-report')
@@ -49,6 +66,13 @@ export class TimeReportController {
   @RequirePermission('time.own.write')
   upsert(@CurrentUser() user: AuthUser, @Body(new ZodPipe(upsertBody)) body: z.infer<typeof upsertBody>, @Req() req: AppRequest) {
     return this.service.upsert(user, body, req);
+  }
+
+  /** "Fill from plan": log the planned items the user confirmed. Existing cells are never overwritten. */
+  @Post('fill-from-plan')
+  @RequirePermission('time.own.write')
+  fillFromPlan(@CurrentUser() user: AuthUser, @Body(new ZodPipe(fillBody)) body: z.infer<typeof fillBody>, @Req() req: AppRequest) {
+    return this.service.fillFromPlan(user, body.items, req);
   }
 
   @Delete('entries/:id')

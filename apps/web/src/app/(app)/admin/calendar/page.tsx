@@ -6,6 +6,7 @@ import { Alert, Button, Card, Dialog, Empty, Field, inputClass, Loading, PageHea
 import { api, errorMessage } from '@/lib/api';
 import { currentMonth, thaiDate, thaiMonth } from '@/lib/format';
 import type { Policy } from '@/lib/types';
+import { Schedules } from './schedules';
 
 interface Holiday {
   id: string;
@@ -17,7 +18,8 @@ interface Holiday {
 export default function CalendarAdminPage() {
   return (
     <div className="space-y-4">
-      <PageHeader title="วันหยุดและนโยบาย" description="วันหยุดบริษัท การปิดงวด และกติกาการบันทึกเวลา" />
+      <PageHeader title="วันหยุดและนโยบาย" description="วันหยุดบริษัท ตารางงาน การปิดงวด และกติกาการบันทึกเวลา" />
+      <Schedules />
       <div className="grid gap-4 xl:grid-cols-[2fr_1fr]">
         <Holidays />
         <div className="space-y-4">
@@ -202,7 +204,6 @@ function PolicyForm() {
   useEffect(() => {
     if (q.data) {
       setForm({
-        dailyTargetMinutes: String(q.data.dailyTargetMinutes / 60),
         incrementMinutes: String(q.data.incrementMinutes),
         maxEntryMinutes: String(q.data.maxEntryMinutes / 60),
         maxDailyMinutes: q.data.maxDailyMinutes == null ? '' : String(q.data.maxDailyMinutes / 60),
@@ -216,7 +217,6 @@ function PolicyForm() {
       api('/calendar/policy', {
         method: 'PUT',
         body: {
-          dailyTargetMinutes: Math.round(Number(form!.dailyTargetMinutes) * 60),
           incrementMinutes: Number(form!.incrementMinutes),
           maxEntryMinutes: Math.round(Number(form!.maxEntryMinutes) * 60),
           maxDailyMinutes: form!.maxDailyMinutes === '' ? null : Math.round(Number(form!.maxDailyMinutes) * 60),
@@ -245,9 +245,7 @@ function PolicyForm() {
         }}
       >
         <Alert tone="warning">ค่าเริ่มต้นเท่ากับระบบเดิม — รอยืนยันนโยบายจากฝ่ายบริหาร (docs/06 Q2–Q4)</Alert>
-        <Field label="เป้าหมายต่อวัน (ชม.)">
-          <input className={inputClass} type="number" step="0.5" min="1" max="12" value={form.dailyTargetMinutes} onChange={set('dailyTargetMinutes')} />
-        </Field>
+        <p className="text-[12px] text-gray-500">ชั่วโมงที่ต้องกรอกต่อวันกำหนดใน “ตารางงาน” ด้านล่าง</p>
         <Field label="หน่วยย่อย (นาที)">
           <select className={inputClass} value={form.incrementMinutes} onChange={set('incrementMinutes')}>
             {[5, 6, 10, 15, 30, 60].map((m) => (

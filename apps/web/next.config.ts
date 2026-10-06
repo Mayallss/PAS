@@ -19,6 +19,9 @@ const csp = [
 const config: NextConfig = {
   poweredByHeader: false,
   reactStrictMode: true,
+  // The /api proxy buffers request bodies and silently cuts them at 10 MB (the upload then hangs until the
+  // proxy times out). Evidence files may be up to UPLOAD_MAX_MB (20 MB) plus multipart overhead.
+  experimental: { proxyClientMaxBodySize: '25mb' },
   // Same-origin proxy: session cookie stays first-party, no CORS surface.
   async rewrites() {
     return [{ source: '/api/:path*', destination: `${API_URL}/api/:path*` }];

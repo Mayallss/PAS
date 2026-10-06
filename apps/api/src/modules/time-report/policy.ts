@@ -48,7 +48,7 @@ export function checkEntry(c: EntryCheck): Violation[] {
     }
   }
   if (c.periodLocked) v.push({ code: 'PERIOD_LOCKED', message: 'งวดนี้ถูกปิดแล้ว ไม่สามารถแก้ไขได้' });
-  if (!c.engagementActive) v.push({ code: 'ENGAGEMENT_INACTIVE', message: 'งานนี้ถูกปิดสำหรับลูกค้ารายนี้แล้ว' });
+  if (!c.engagementActive) v.push({ code: 'ENGAGEMENT_INACTIVE', message: 'Activity นี้ถูกปิดสำหรับลูกค้ารายนี้แล้ว' });
   if (p.backdateDays != null && c.workDate < addDays(c.today, -p.backdateDays)) {
     v.push({ code: 'BACKDATE_LIMIT', message: `บันทึกย้อนหลังได้ไม่เกิน ${p.backdateDays} วัน` });
   }

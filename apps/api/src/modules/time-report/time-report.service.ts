@@ -1,5 +1,5 @@
 import { HttpStatus, Injectable } from '@nestjs/common';
-import { EmploymentStatus, Prisma, TimeEntry } from '@prisma/client';
+import { EmploymentStatus, Prisma, TimeEntry, WorkCategoryType } from '@prisma/client';
 import { loadConfig } from '../../config';
 import { addDays, isWeekend, isoWeekday, monthOf, monthRange, todayIn, toDate, toIsoDate, weekRange } from '../../common/dates';
 import { conflict, DomainError, forbidden, notFound } from '../../common/errors';
@@ -30,6 +30,8 @@ const entryDto = (e: TimeEntry) => ({
   status: e.status,
   version: e.version,
   updatedAt: e.updatedAt,
+  /** Posted by an approved leave request — read-only here (docs/09). */
+  leaveRequestId: e.leaveRequestId,
 });
 
 const auditSnapshot = (e: TimeEntry) => ({
@@ -78,7 +80,7 @@ export class TimeReportService {
   }
 
   /** Day metadata for one employee: weekend/holiday/lock flags and required minutes from their work schedule. */
-  private async dayFrame(employee: ScheduledEmployee, dates: string[]) {
+  async dayFrame(employee: ScheduledEmployee, dates: string[]) {
     const months = [...new Set(dates.map(monthOf))];
     const [policy, holidays, locks, schedule] = await Promise.all([
       this.calendar.policy(),
@@ -105,7 +107,7 @@ export class TimeReportService {
     return { policy, days, scheduleName: perDate.get(dates[0])?.schedule ?? null };
   }
 
-  private async employeeOrThrow(employeeId: string) {
+  async employeeOrThrow(employeeId: string) {
     const employee = await this.prisma.employee.findUnique({ where: { id: employeeId }, select: { id: true, fullName: true, orgUnitId: true } });
     if (!employee) throw notFound('พนักงาน');
     return employee;
@@ -248,6 +250,10 @@ export class TimeReportService {
       include: ENGAGEMENT_INCLUDE,
     });
     if (!engagement) throw notFound('งาน');
+    // Leave goes through a leave request (approval, balance); approval posts the row here.
+    if (engagement.workCategory.type === WorkCategoryType.LEAVE && (await tx.leaveType.count({ where: { workCategoryId: engagement.workCategoryId } }))) {
+      throw new DomainError('LEAVE_USE_REQUEST', 'การลาให้ยื่นใบลาที่เมนู "การลา" — เมื่ออนุมัติ ระบบจะลงเวลาให้เอง', HttpStatus.UNPROCESSABLE_ENTITY);
+    }
     const workDate = toDate(input.workDate);
     const description = input.description?.trim() || null;
 
@@ -306,11 +312,51 @@ export class TimeReportService {
     return entryDto(updated);
   }
 
+  /**
+   * "Fill from plan" (decision 2026-09-29): the user confirms planned items to log as actual time.
+   * Each cell goes through the normal rules on its own, so one locked day does not block the rest,
+   * and a cell that already has time is left untouched — the plan never overwrites what really happened.
+   */
+  async fillFromPlan(user: AuthUser, items: Omit<UpsertEntryInput, 'expectedVersion'>[], req: AppRequest) {
+    const results: { engagementId: string; workDate: string; result: 'CREATED' | 'SKIPPED_EXISTS' | 'REJECTED'; message?: string }[] = [];
+    const seen = new Set<string>();
+    for (const it of items) {
+      const key = `${it.engagementId}|${it.workDate}`;
+      const base = { engagementId: it.engagementId, workDate: it.workDate };
+      if (seen.has(key)) {
+        results.push({ ...base, result: 'REJECTED', message: 'รายการซ้ำในคำขอเดียวกัน' });
+        continue;
+      }
+      seen.add(key);
+      const exists = await this.prisma.timeEntry.findFirst({
+        where: { employeeId: user.id, engagementId: it.engagementId, workDate: toDate(it.workDate), deletedAt: null },
+        select: { id: true },
+      });
+      if (exists) {
+        results.push({ ...base, result: 'SKIPPED_EXISTS' });
+        continue;
+      }
+      try {
+        await this.upsert(user, { engagementId: it.engagementId, workDate: it.workDate, durationMinutes: it.durationMinutes, description: it.description }, req);
+        results.push({ ...base, result: 'CREATED' });
+      } catch (e) {
+        if (!(e instanceof DomainError)) throw e;
+        const body = e.getResponse() as { message?: string };
+        results.push({ ...base, result: 'REJECTED', message: body.message ?? 'บันทึกไม่ได้' });
+      }
+    }
+    return {
+      created: results.filter((r) => r.result === 'CREATED').length,
+      results,
+    };
+  }
+
   async remove(user: AuthUser, id: string, expectedVersion: number, req: AppRequest) {
     await this.prisma.$transaction(async (tx) => {
       const entry = await tx.timeEntry.findFirst({ where: { id, deletedAt: null } });
       if (!entry) throw notFound('รายการ');
       if (entry.employeeId !== user.id) throw forbidden('แก้ไขได้เฉพาะรายการของตนเอง');
+      if (entry.leaveRequestId) throw new DomainError('LEAVE_MANAGED', 'รายการนี้มาจากใบลา — ยกเลิกได้ที่เมนู "การลา"', HttpStatus.UNPROCESSABLE_ENTITY);
       const workDate = toIsoDate(entry.workDate);
       rejectIf(
         checkDelete({
