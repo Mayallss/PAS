@@ -17,7 +17,7 @@ process.env.STORAGE_DIR = resolve(tmpdir(), `pas-test-uploads-${process.env.PAS_
 process.env.UPLOAD_MAX_MB = '1';
 // Never the real monday board from tests: .env holds the live token, so override it.
 process.env.MONDAY_API_TOKEN = 'test-monday-token';
-process.env.MONDAY_HANDOFF_BOARD_ID = '5031213491';
+process.env.MONDAY_HANDOFF_BOARD_ID = '1862570548';
 process.env.HANDOFF_LINK_SECRET = 'test-link-secret-0123456789abcdef0123456789abcdef';
 // Google Calendar: a throwaway service-account key so the sync code path is "configured"; tests replace the transport
 // with a fake Google, and the background worker never runs (interval 0).

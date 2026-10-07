@@ -7,7 +7,7 @@ import { login, prisma, Session, startApp } from './helpers';
  * รับ–ส่งเอกสาร (ex-DELIPAS) against a FAKE monday: global fetch is replaced for api.monday.com,
  * so no test can reach the real board (test/env.ts also overrides the token).
  */
-const BOARD = '5031213491';
+const BOARD = '1862570548';
 const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
 const STATUS_LABELS = { '0': 'รับเอกสารไม่ครบถ้วน', '1': 'ได้รับเอกสารครบถ้วน/ส่งมอบเอกสารแล้ว', '2': 'ไม่ได้รับเอกสาร/ไม่ได้ส่งมอบเอกสาร', '5': 'รอดำเนินการ' };
 
@@ -57,7 +57,7 @@ async function fakeMonday(url: string, init: RequestInit): Promise<Response> {
     const it = items.get(String(variables.item))!;
     const values = JSON.parse(variables.values);
     it.status = String(values.single_select_1.index);
-    it.signer = values.text_mm7mkazh;
+    it.signer = values.text_mm7xtpds;
     calls.push(`status:${it.id}:${it.status}`);
     return ok({ change_multiple_column_values: { id: it.id } });
   }
@@ -65,8 +65,8 @@ async function fakeMonday(url: string, init: RequestInit): Promise<Response> {
     { id: 'dropdown', type: 'dropdown', settings_str: JSON.stringify({ labels: [] }) },
     { id: 'single_select_1', type: 'status', settings_str: JSON.stringify({ labels: STATUS_LABELS }) },
     { id: 'signature', type: 'file', settings_str: '{}' },
-    { id: 'text_mm7mkazh', type: 'text', settings_str: '{}' },
-    { id: 'text_mm7mtsjf', type: 'text', settings_str: '{}' },
+    { id: 'text_mm7xtpds', type: 'text', settings_str: '{}' },
+    { id: 'text_mm7x9rpf', type: 'text', settings_str: '{}' },
   ];
   if (query.includes('items_page(limit:1')) {
     const it = items.get(String(variables.ids[0]));
