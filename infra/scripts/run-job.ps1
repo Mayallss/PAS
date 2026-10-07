@@ -6,12 +6,15 @@
   # First administrator (prints a one-time set-password link)
   .\infra\scripts\run-job.ps1 -Job bootstrap-admin -Email you@pas-acc.com -Name "ชื่อ นามสกุล" -Username you
 
+  # Sidebar apps only (IT assets, Delivery System, Document Store …) — safe for production
+  .\infra\scripts\run-job.ps1 -Job seed-apps
+
   # Fictional demo data (employee@pas.test …) — for a test environment only
   .\infra\scripts\run-job.ps1 -Job seed-demo
 #>
 [CmdletBinding()]
 param(
-  [Parameter(Mandatory)][ValidateSet('bootstrap-admin', 'seed-demo', 'migrate')][string]$Job,
+  [Parameter(Mandatory)][ValidateSet('bootstrap-admin', 'seed-apps', 'seed-demo', 'migrate')][string]$Job,
   [string]$Email,
   [string]$Name,
   [string]$Username
@@ -38,6 +41,7 @@ switch ($Job) {
     if ($Name) { $extraEnv += @{ name = 'BOOTSTRAP_NAME'; value = $Name } }
     if ($Username) { $extraEnv += @{ name = 'BOOTSTRAP_USERNAME'; value = $Username } }
   }
+  'seed-apps' { $cmd = 'cd /app/packages/db && node /app/node_modules/tsx/dist/cli.mjs prisma/seed-apps.ts' }
   'seed-demo' { $cmd = 'cd /app/packages/db && node ../../node_modules/prisma/build/index.js db seed' }
   'migrate' { $cmd = 'node /app/node_modules/prisma/build/index.js migrate deploy --schema /app/packages/db/prisma/schema.prisma' }
 }
@@ -51,15 +55,15 @@ Write-Host "Starting job '$Job' on $cluster …" -ForegroundColor Cyan
 $taskArn = aws ecs run-task --region $region --cluster $cluster --task-definition $taskDef `
   --capacity-provider-strategy capacityProvider=FARGATE,weight=1 `
   --network-configuration "awsvpcConfiguration={subnets=[$subnets],securityGroups=[$sg],assignPublicIp=ENABLED}" `
-  --overrides $fileUri --query 'tasks[0].taskArn' --output text
+  --overrides $fileUri --query 'tasks[0].taskArn' --output text --no-cli-pager
 Remove-Item $tmp
 if ($LASTEXITCODE -ne 0 -or -not $taskArn -or $taskArn -eq 'None') { throw 'run-task failed' }
 
 Write-Host "Task: $taskArn — waiting for it to finish (1–3 min) …"
 aws ecs wait tasks-stopped --region $region --cluster $cluster --tasks $taskArn
-$exit = aws ecs describe-tasks --region $region --cluster $cluster --tasks $taskArn --query 'tasks[0].containers[0].exitCode' --output text
+$exit = aws ecs describe-tasks --region $region --cluster $cluster --tasks $taskArn --query 'tasks[0].containers[0].exitCode' --output text --no-cli-pager
 $taskId = $taskArn.Split('/')[-1]
 $logGroup = "/ecs/$cluster/jobs"
 Write-Host "--- log ($logGroup, stream jobs/jobs/$taskId) ---" -ForegroundColor Cyan
-aws logs get-log-events --region $region --log-group-name $logGroup --log-stream-name "jobs/jobs/$taskId" --query 'events[].message' --output text
+aws logs get-log-events --region $region --log-group-name $logGroup --log-stream-name "jobs/jobs/$taskId" --query 'events[].message' --output text --no-cli-pager
 Write-Host "exit code: $exit" -ForegroundColor $(if ($exit -eq '0') { 'Green' } else { 'Red' })
