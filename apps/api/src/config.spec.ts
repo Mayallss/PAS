@@ -20,7 +20,7 @@ const load = (env: Record<string, string>) => {
 
 it('an invalid integration setting switches that integration off instead of crashing', () => {
   const c = load({ MONDAY_HANDOFF_BOARD_ID: 'not-a-number', CALENDAR_SYNC_INTERVAL_MS: '-5', GOOGLE_SA_EMAIL: 'x@p.iam.gserviceaccount.com', GOOGLE_SA_PRIVATE_KEY: key.replace(/\n/g, '\\n') });
-  expect(c.MONDAY_HANDOFF_BOARD_ID).toBe('5031213491'); // back to the default
+  expect(c.MONDAY_HANDOFF_BOARD_ID).toBe('1862570548'); // back to the default
   expect(c.integrationIssues.map((i) => i.setting).sort()).toEqual(['CALENDAR_SYNC_INTERVAL_MS', 'MONDAY_HANDOFF_BOARD_ID']);
   expect(c.googleCalendarEnabled).toBe(false); // its interval setting was wrong → whole integration off
 });

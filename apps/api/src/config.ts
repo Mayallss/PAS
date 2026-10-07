@@ -24,10 +24,10 @@ const schema = z.object({
   /** รับ–ส่งเอกสาร (ex-DELIPAS): board work runs with this server-side monday token. Empty = feature shows "not configured". */
   MONDAY_API_TOKEN: z.string().optional().default(''),
   /** Board that holds the document hand-over tickets. */
-  MONDAY_HANDOFF_BOARD_ID: z.string().regex(/^\d+$/).default('5031213491'),
+  MONDAY_HANDOFF_BOARD_ID: z.string().regex(/^\d+$/).default('1862570548'),
   /** Text columns that receive the signer's name and the Thai save time. Column ids differ per board (monday assigns them). */
-  MONDAY_HANDOFF_SIGNER_COLUMN: z.string().regex(/^[a-z0-9_]{1,64}$/).default('text_mm7mkazh'),
-  MONDAY_HANDOFF_SIGNED_AT_COLUMN: z.string().regex(/^[a-z0-9_]{1,64}$/).default('text_mm7mtsjf'),
+  MONDAY_HANDOFF_SIGNER_COLUMN: z.string().regex(/^[a-z0-9_]{1,64}$/).default('text_mm7xtpds'),
+  MONDAY_HANDOFF_SIGNED_AT_COLUMN: z.string().regex(/^[a-z0-9_]{1,64}$/).default('text_mm7x9rpf'),
   /** Signs share links and save tokens — separate from the monday token (DELIPAS used the token itself). */
   HANDOFF_LINK_SECRET: z.string().optional().default(''),
   /**
