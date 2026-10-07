@@ -1,0 +1,26 @@
+name: Terraform check
+
+# Format + validate + mock tests for infra/terraform. Needs no AWS access; `terraform apply` stays a manual step.
+on:
+  pull_request:
+    paths: ['infra/terraform/**']
+  push:
+    branches: [main]
+    paths: ['infra/terraform/**']
+
+permissions:
+  contents: read
+
+jobs:
+  terraform:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: infra/terraform
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+      - run: terraform fmt -check -recursive
+      - run: terraform init -backend=false -input=false
+      - run: terraform validate
+      - run: terraform test

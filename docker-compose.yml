@@ -1,4 +1,4 @@
-# Local development only. Production uses Cloud SQL (see docs/05-proposed-architecture.md).
+# Local development only. Production on AWS uses Amazon RDS for PostgreSQL (see infra/DEPLOY-AWS.md).
 services:
   postgres:
     image: postgres:16-alpine

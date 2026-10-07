@@ -1,0 +1,16 @@
+**/node_modules
+**/.next
+**/dist
+**/coverage
+**/*.tsbuildinfo
+.git
+.github
+.claude
+.env
+.env.*
+!.env.example
+apps/api/var
+logo-animation
+docs
+infra
+*.md

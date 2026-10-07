@@ -1,0 +1,180 @@
+name: Deploy to AWS
+
+# push to main → test → build images → push to ECR → roll out on ECS (Fargate).
+# One-time setup: infra/DEPLOY-AWS.md §8 (Terraform creates the OIDC role; no AWS keys are stored in GitHub).
+#
+# Repository variables (Settings → Secrets and variables → Actions → Variables):
+#   AWS_DEPLOY_ROLE_ARN  terraform output github_deploy_role_arn   (required)
+#   AWS_REGION           ap-southeast-1                            (required)
+#   PROJECT              pas                                       (optional, = Terraform var project)
+#   ENABLE_SITE          true                                      (optional, when enable_site = true)
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.md'
+      - 'logo-animation/**'
+      - 'infra/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+env:
+  PROJECT: ${{ vars.PROJECT || 'pas' }}
+  AWS_REGION: ${{ vars.AWS_REGION }}
+  IMAGE_TAG: ${{ github.sha }}
+
+jobs:
+  verify:
+    name: Typecheck + tests
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: pas
+          POSTGRES_PASSWORD: pas_ci_only
+          POSTGRES_DB: pas
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U pas -d pas" --health-interval 5s --health-retries 10
+    env:
+      DATABASE_URL: postgresql://pas:pas_ci_only@localhost:5432/pas
+      TEST_DATABASE_URL: postgresql://pas:pas_ci_only@localhost:5432/pas_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run generate --workspace @pas/db
+      - run: npm run typecheck
+      - run: npm test
+
+  build:
+    name: Build ${{ matrix.target }}
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    strategy:
+      fail-fast: true
+      matrix:
+        target: ${{ fromJSON(vars.ENABLE_SITE == 'true' && '["api","web","site"]' || '["api","web"]') }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: ${{ matrix.target }}
+          platforms: linux/amd64
+          push: true
+          provenance: false
+          tags: ${{ steps.ecr.outputs.registry }}/${{ env.PROJECT }}/${{ matrix.target }}:${{ env.IMAGE_TAG }}
+          cache-from: type=gha,scope=${{ matrix.target }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.target }}
+
+  deploy:
+    name: Roll out on ECS
+    needs: build
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      # Start from the newest revisions so settings changed by Terraform (env vars, secrets, sizes) are kept.
+      - name: Fetch current task definitions
+        run: |
+          aws ecs describe-task-definition --task-definition "$PROJECT-app"  --query taskDefinition > app.json
+          aws ecs describe-task-definition --task-definition "$PROJECT-jobs" --query taskDefinition > jobs.json
+          if [ "${{ vars.ENABLE_SITE }}" = "true" ]; then
+            aws ecs describe-task-definition --task-definition "$PROJECT-site" --query taskDefinition > site.json
+          fi
+
+      - id: app-api
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: app.json
+          container-name: api
+          image: ${{ steps.ecr.outputs.registry }}/${{ env.PROJECT }}/api:${{ env.IMAGE_TAG }}
+
+      - id: app-web
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: ${{ steps.app-api.outputs.task-definition }}
+          container-name: web
+          image: ${{ steps.ecr.outputs.registry }}/${{ env.PROJECT }}/web:${{ env.IMAGE_TAG }}
+
+      # The API runs `prisma migrate deploy` on start; a failed start rolls back (deployment circuit breaker).
+      - name: Deploy portal (API + web)
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
+        with:
+          task-definition: ${{ steps.app-web.outputs.task-definition }}
+          cluster: ${{ env.PROJECT }}
+          service: ${{ env.PROJECT }}-app
+          wait-for-service-stability: true
+          wait-for-minutes: 15
+
+      # One-off jobs (bootstrap-admin, seed) use the same code as the API.
+      - id: jobs
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: jobs.json
+          container-name: jobs
+          image: ${{ steps.ecr.outputs.registry }}/${{ env.PROJECT }}/api:${{ env.IMAGE_TAG }}
+
+      - name: Register jobs task definition
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
+        with:
+          task-definition: ${{ steps.jobs.outputs.task-definition }}
+
+      - id: site
+        if: vars.ENABLE_SITE == 'true'
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: site.json
+          container-name: site
+          image: ${{ steps.ecr.outputs.registry }}/${{ env.PROJECT }}/site:${{ env.IMAGE_TAG }}
+
+      - name: Deploy public website
+        if: vars.ENABLE_SITE == 'true'
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
+        with:
+          task-definition: ${{ steps.site.outputs.task-definition }}
+          cluster: ${{ env.PROJECT }}
+          service: ${{ env.PROJECT }}-site
+          wait-for-service-stability: true
+
+      - name: Summary
+        run: |
+          echo "### Deployed \`${IMAGE_TAG::7}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "Logs: \`aws logs tail /ecs/$PROJECT/api --follow\`" >> "$GITHUB_STEP_SUMMARY"

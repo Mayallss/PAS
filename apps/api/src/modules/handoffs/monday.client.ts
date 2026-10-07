@@ -8,8 +8,6 @@ import { DomainError } from '../../common/errors';
 export const COLUMNS = {
   status: 'single_select_1',
   files: 'signature',
-  signer: 'text_mm7mkazh',
-  signedAt: 'text_mm7mtsjf',
   date: 'date',
   customer: 'dropdown',
 } as const;
@@ -116,10 +114,17 @@ export function normalize(item: MondayItem, labels: { id: number; name: string }
 
 const unavailable = (status = 502) => new DomainError('MONDAY_UNAVAILABLE', 'ติดต่อ monday ไม่สำเร็จ กรุณาลองอีกครั้ง', status);
 
+/** Text columns for the signer's name and save time — monday assigns their ids per board, so they come from config. */
+export interface SignerColumns {
+  signer: string;
+  signedAt: string;
+}
+
 export class MondayClient {
   constructor(
     private readonly token: string,
     readonly boardId: string,
+    private readonly signerColumns: SignerColumns,
     private readonly transport: typeof fetch = fetch,
   ) {}
 
@@ -172,8 +177,9 @@ export class MondayClient {
   async item(id: string) {
     if (!/^\d{1,20}$/.test(id)) throw new DomainError('BAD_ITEM', 'เลขรายการไม่ถูกต้อง', 400);
     type Board = { columns: { id: string; type: string; settings_str: string }[]; items_page: { items: MondayItem[] } };
+    const { signer, signedAt } = this.signerColumns;
     const data = await this.call<{ boards: Board[] }>(
-      `query($ids:[ID!]){boards(ids:[${this.boardId}]){columns(ids:${JSON.stringify([COLUMNS.customer, COLUMNS.status, COLUMNS.files, COLUMNS.signer, COLUMNS.signedAt])}){id type settings_str} items_page(limit:1,query_params:{ids:$ids}){items{${detailFields}}}}}`,
+      `query($ids:[ID!]){boards(ids:[${this.boardId}]){columns(ids:${JSON.stringify([COLUMNS.customer, COLUMNS.status, COLUMNS.files, signer, signedAt])}){id type settings_str} items_page(limit:1,query_params:{ids:$ids}){items{${detailFields}}}}}`,
       { ids: [id] },
     );
     const board = data.boards?.[0];
@@ -184,7 +190,7 @@ export class MondayClient {
     const ok =
       colOf(COLUMNS.status)?.type === 'status' &&
       colOf(COLUMNS.files)?.type === 'file' &&
-      [COLUMNS.signer, COLUMNS.signedAt].every((cid) => colOf(cid)?.type === 'text') &&
+      [signer, signedAt].every((cid) => colOf(cid)?.type === 'text') &&
       Object.entries(OUTCOMES).every(([index, label]) => statusLabels?.[index] === label);
     if (!ok) throw new DomainError('BOARD_CHANGED', 'คอลัมน์หรือชื่อสถานะในบอร์ด monday เปลี่ยนไป กรุณาให้ผู้ดูแลตรวจการเชื่อมต่อ', 409);
     const labels = parseJson<{ labels?: { id: number; name: string }[] }>(colOf(COLUMNS.customer)?.settings_str)?.labels ?? [];
@@ -218,7 +224,7 @@ export class MondayClient {
   saveResult(id: string, outcome: Outcome, signer: string, signedAt: string, idempotencyKey: string) {
     return this.call(
       `mutation($item:ID!,$values:JSON!){change_multiple_column_values(board_id:${this.boardId},item_id:$item,column_values:$values){id}}`,
-      { item: id, values: JSON.stringify({ [COLUMNS.status]: { index: Number(outcome) }, [COLUMNS.signer]: signer, [COLUMNS.signedAt]: signedAt }) },
+      { item: id, values: JSON.stringify({ [COLUMNS.status]: { index: Number(outcome) }, [this.signerColumns.signer]: signer, [this.signerColumns.signedAt]: signedAt }) },
       idempotencyKey,
     );
   }

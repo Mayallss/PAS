@@ -6,3 +6,12 @@ coverage/
 .env
 .env.*
 !.env.example
+
+# Terraform (state holds secrets — never commit)
+infra/terraform/.terraform/
+infra/terraform/.terraform.lock.hcl
+infra/terraform/*.tfstate
+infra/terraform/*.tfstate.*
+infra/terraform/terraform.tfvars
+infra/terraform/image_tag.auto.tfvars
+infra/.docker/

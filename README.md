@@ -18,6 +18,7 @@ apps/web      Next.js UI  — internal employee portal (/time-report, /reports, 
 apps/site     Next.js     — public company website pas-acc.com (/th, /en) — separate app, see below
 packages/db   Prisma schema, migrations, dev seed
 docs/         Discovery, gap analysis, architecture, open questions
+infra/        AWS deployment: Terraform (ECS Fargate, RDS, S3, Cognito, Secrets Manager, CloudWatch) + PowerShell scripts
 ```
 
 ## Modules
@@ -112,6 +113,11 @@ npm test             # unit + integration (creates and drops its own pas_test_<t
 npm run typecheck
 npm run build
 ```
+
+## Deploy to AWS
+
+`Dockerfile` (targets `api`, `web`, `site`) + `infra/terraform` + `infra/scripts/deploy.ps1`.
+Step-by-step guide (Thai): [`infra/DEPLOY-AWS.md`](infra/DEPLOY-AWS.md).
 
 ## Security model — what changed from the legacy system
 

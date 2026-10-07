@@ -13,7 +13,7 @@ export async function createApp(): Promise<INestApplication> {
   const app = await NestFactory.create<NestExpressApplication>(AppModule, {
     logger: process.env.NODE_ENV === 'test' ? ['error'] : ['log', 'warn', 'error'],
   });
-  // Behind exactly one proxy (Next.js rewrite locally, Google load balancer in production).
+  // Behind exactly one proxy (Next.js rewrite locally, AWS Application Load Balancer → Next.js in production).
   app.set('trust proxy', 1);
   app.disable('x-powered-by');
   app.use(requestIdMiddleware);

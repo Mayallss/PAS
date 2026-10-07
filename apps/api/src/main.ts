@@ -6,7 +6,7 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { createApp } from './bootstrap';
 import { loadConfig } from './config';
 
-// Local development: load the repo-root .env (production injects env vars from Secret Manager).
+// Local development: load the repo-root .env (production: ECS injects env vars from AWS Secrets Manager).
 const envFile = resolve(__dirname, '../../../.env');
 if (existsSync(envFile)) process.loadEnvFile(envFile);
 

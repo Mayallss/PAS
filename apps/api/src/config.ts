@@ -5,7 +5,7 @@ const schema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   DATABASE_URL: z.string().min(1),
   API_PORT: z.coerce.number().default(4000),
-  /** 127.0.0.1 locally; 0.0.0.0 in containers (Cloud Run). */
+  /** 127.0.0.1 locally and on ECS (web container reaches it over localhost in the same task). */
   API_HOST: z.string().default('127.0.0.1'),
   APP_ORIGIN: z.string().url().default('http://localhost:3000'),
   SESSION_TTL_HOURS: z.coerce.number().min(1).max(24).default(10),
@@ -16,13 +16,18 @@ const schema = z.object({
   OIDC_REDIRECT_URI: z.string().optional().default(''),
   /** Optional: only accept identities from this e-mail domain (e.g. pas-acc.com). */
   OIDC_ALLOWED_DOMAIN: z.string().optional().default(''),
-  /** Evidence files (IT asset). Local folder in development; object storage (GCS) in production — docs/05. */
+  /** Evidence files (IT asset). Local folder in development; Amazon S3 (S3_BUCKET) in production. */
   STORAGE_DIR: z.string().default('var/uploads'),
+  /** Amazon S3 bucket for evidence files. Empty = use STORAGE_DIR on local disk. */
+  S3_BUCKET: z.string().optional().default(''),
   UPLOAD_MAX_MB: z.coerce.number().min(1).max(50).default(20),
   /** รับ–ส่งเอกสาร (ex-DELIPAS): board work runs with this server-side monday token. Empty = feature shows "not configured". */
   MONDAY_API_TOKEN: z.string().optional().default(''),
   /** Board that holds the document hand-over tickets. */
   MONDAY_HANDOFF_BOARD_ID: z.string().regex(/^\d+$/).default('5031213491'),
+  /** Text columns that receive the signer's name and the Thai save time. Column ids differ per board (monday assigns them). */
+  MONDAY_HANDOFF_SIGNER_COLUMN: z.string().regex(/^[a-z0-9_]{1,64}$/).default('text_mm7mkazh'),
+  MONDAY_HANDOFF_SIGNED_AT_COLUMN: z.string().regex(/^[a-z0-9_]{1,64}$/).default('text_mm7mtsjf'),
   /** Signs share links and save tokens — separate from the monday token (DELIPAS used the token itself). */
   HANDOFF_LINK_SECRET: z.string().optional().default(''),
   /**
@@ -79,6 +84,8 @@ const INTEGRATION_SETTINGS: Record<string, IntegrationIssue['integration']> = {
   OIDC_ALLOWED_DOMAIN: 'google_login',
   MONDAY_API_TOKEN: 'monday',
   MONDAY_HANDOFF_BOARD_ID: 'monday',
+  MONDAY_HANDOFF_SIGNER_COLUMN: 'monday',
+  MONDAY_HANDOFF_SIGNED_AT_COLUMN: 'monday',
   HANDOFF_LINK_SECRET: 'monday',
   GOOGLE_SA_EMAIL: 'google_calendar',
   GOOGLE_SA_PRIVATE_KEY: 'google_calendar',

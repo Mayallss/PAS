@@ -45,7 +45,10 @@ export class HandoffsService {
   private client() {
     const c = loadConfig();
     if (!c.MONDAY_API_TOKEN) throw new DomainError('NOT_CONFIGURED', 'ยังไม่ได้ตั้งค่าการเชื่อมต่อ monday (MONDAY_API_TOKEN)', 503);
-    return new MondayClient(c.MONDAY_API_TOKEN, c.MONDAY_HANDOFF_BOARD_ID);
+    return new MondayClient(c.MONDAY_API_TOKEN, c.MONDAY_HANDOFF_BOARD_ID, {
+      signer: c.MONDAY_HANDOFF_SIGNER_COLUMN,
+      signedAt: c.MONDAY_HANDOFF_SIGNED_AT_COLUMN,
+    });
   }
 
   private secret() {
