@@ -166,18 +166,24 @@ role ของ GitHub push image และ deploy ได้อย่างเด
 
 ### ตั้งค่าครั้งเดียว
 
-1. ใน `terraform.tfvars` ใส่ `github_repo = "Mayallss/PAS"` แล้วรัน `.\infra\scripts\deploy.ps1`
-   (ครั้งแรกต้องรันแบบเต็มจากเครื่องหนึ่งครั้ง เพื่อสร้าง ECS service และ image ชุดแรก ครั้งต่อไปใช้ `-InfraOnly`)
-2. คัดลอกค่า: `cd infra\terraform; terraform output github_deploy_role_arn`
-3. GitHub → repo **PAS** → Settings → Secrets and variables → Actions → แท็บ **Variables** → New repository variable:
-   - `AWS_DEPLOY_ROLE_ARN` = ค่าจากข้อ 2
-   - `AWS_REGION` = `ap-southeast-1`
-   - (ถ้าเปิดเว็บบริษัท) `ENABLE_SITE` = `true`
-4. (แนะนำ) Settings → Environments → **production** → Required reviewers → ใส่ตัวเอง
-   ทุก deploy จะรอให้กด Approve ก่อน (environment นี้ถูกสร้างอัตโนมัติหลัง workflow รันครั้งแรก)
-5. push ขึ้น `main` หรือ Actions → **Deploy to AWS** → Run workflow
+1. ใน `terraform.tfvars` ใส่ `github_repo = "Mayallss/PAS"` แล้วรัน `.\infra\scripts\deploy.ps1 -InfraOnly`
+   Terraform จะสร้าง IAM user `pas-github-deploy` ที่ทำได้แค่ push image + deploy
+2. ดึง key (ห้ามส่งให้ใคร/ห้าม commit):
+   ```powershell
+   cd infra\terraform
+   terraform output -raw github_access_key_id
+   terraform output -raw github_secret_access_key
+   ```
+3. GitHub → repo **PAS** → Settings → Secrets and variables → Actions
+   - แท็บ **Secrets** → New repository secret: `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` (ค่าจากข้อ 2)
+   - แท็บ **Variables** → New repository variable: `AWS_REGION` = region ใน tfvars (เช่น `ap-southeast-2`)
+   - (ถ้าเปิดเว็บบริษัท) Variable `ENABLE_SITE` = `true`
+4. ย้าย workflow เข้าที่: `Move-Item infra\github-workflows\*.yml .github\workflows\` แล้ว commit + push ขึ้น `main`
+5. (แนะนำ) Settings → Environments → **production** → Required reviewers → ใส่ตัวเอง
 
-ถ้าบัญชี AWS มี GitHub OIDC provider อยู่แล้ว (เคยตั้งให้ repo อื่น) ให้ใส่ `create_github_oidc_provider = false`
+บัญชี AWS แบบ Free plan ใหม่ห้ามสร้าง OIDC provider (SCP) จึงใช้ access key เป็นค่าเริ่มต้น
+ถ้าบัญชีอนุญาต OIDC ให้ตั้ง `github_auth = "oidc"` แล้วใช้ Variable `AWS_DEPLOY_ROLE_ARN` แทน secrets ทั้งสอง
+หมุน key: `terraform apply -replace='aws_iam_access_key.github_deploy[0]'` แล้วอัปเดต secrets
 
 ### หมายเหตุ
 

@@ -60,7 +60,20 @@ run "github_cicd_role" {
     github_repo = "Mayallss/PAS"
   }
   assert {
-    condition     = length(aws_iam_role.github_deploy) == 1 && length(aws_iam_openid_connect_provider.github) == 1
-    error_message = "github role"
+    condition     = length(aws_iam_user.github_deploy) == 1 && length(aws_iam_openid_connect_provider.github) == 0
+    error_message = "github user (default access_key mode)"
+  }
+}
+
+run "github_oidc_mode" {
+  command = apply
+  variables {
+    alert_email = "a@b.com"
+    github_repo = "Mayallss/PAS"
+    github_auth = "oidc"
+  }
+  assert {
+    condition     = length(aws_iam_role.github_deploy) == 1 && length(aws_iam_user.github_deploy) == 0
+    error_message = "github oidc role"
   }
 }

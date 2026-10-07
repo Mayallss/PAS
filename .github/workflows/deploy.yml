@@ -1,11 +1,14 @@
 name: Deploy to AWS
 
 # push to main → test → build images → push to ECR → roll out on ECS (Fargate).
-# One-time setup: infra/DEPLOY-AWS.md §8 (Terraform creates the OIDC role; no AWS keys are stored in GitHub).
+# One-time setup: infra/DEPLOY-AWS.md §8.
 #
-# Repository variables (Settings → Secrets and variables → Actions → Variables):
-#   AWS_DEPLOY_ROLE_ARN  terraform output github_deploy_role_arn   (required)
-#   AWS_REGION           ap-southeast-1                            (required)
+# Repository secrets (Settings → Secrets and variables → Actions → Secrets) — access-key mode (default):
+#   AWS_ACCESS_KEY_ID      terraform output -raw github_access_key_id
+#   AWS_SECRET_ACCESS_KEY  terraform output -raw github_secret_access_key
+# Repository variables (… → Variables):
+#   AWS_REGION           e.g. ap-southeast-2                       (required)
+#   AWS_DEPLOY_ROLE_ARN  only in OIDC mode (github_auth = "oidc")
 #   PROJECT              pas                                       (optional, = Terraform var project)
 #   ENABLE_SITE          true                                      (optional, when enable_site = true)
 
@@ -75,6 +78,10 @@ jobs:
 
       - uses: aws-actions/configure-aws-credentials@v4
         with:
+          # access-key mode (default): secrets AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY
+          # OIDC mode: variable AWS_DEPLOY_ROLE_ARN (leave the secrets unset)
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
@@ -105,6 +112,10 @@ jobs:
     steps:
       - uses: aws-actions/configure-aws-credentials@v4
         with:
+          # access-key mode (default): secrets AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY
+          # OIDC mode: variable AWS_DEPLOY_ROLE_ARN (leave the secrets unset)
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
