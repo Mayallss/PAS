@@ -21,3 +21,8 @@ app_desired_count = 1
 
 # CI/CD: GitHub Actions deploys on push to main (see infra/DEPLOY-AWS.md §8)
 github_repo = "Mayallss/PAS"
+
+# n8n — https://n8n.pas-acc.com (see n8n.tf). Add the DNS records from: terraform output n8n_acm_validation_records
+# enable_n8n      = true
+# n8n_domain_name = "n8n.pas-acc.com"
+# n8n_editor_allowed_cidrs = ["x.x.x.x/32"]   # limit the editor to the office IP; webhooks stay public

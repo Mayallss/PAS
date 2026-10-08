@@ -64,3 +64,7 @@ output "cognito_hosted_login_domain" {
 output "db_endpoint" {
   value = aws_db_instance.main.address
 }
+
+output "dbtool_task_definition" {
+  value = aws_ecs_task_definition.dbtool.family
+}

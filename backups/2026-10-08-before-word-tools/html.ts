@@ -2,34 +2,18 @@ import { diffArrays } from 'diff';
 import sanitize from 'sanitize-html';
 
 /**
- * Rich text for meeting minutes. Allow-list only: formatting, lists, tables, safe links, and the Word-style tools of
- * the editor (2026-10-08) as inline styles with FIXED value patterns — alignment, hex colours, highlight, font size,
- * line spacing, indent. Any other style property or value, scripts, event handlers, iframes and images are stripped.
+ * Rich text for meeting minutes. Allow-list only: formatting, lists, tables, safe links.
+ * Everything else (scripts, event handlers, styles, iframes, images with remote src) is stripped.
  */
-const HEX = /^#[0-9a-fA-F]{6}$/;
-const STYLES: sanitize.IOptions['allowedStyles'] = {
-  '*': {
-    'text-align': [/^(left|right|center|justify)$/],
-    color: [HEX, /^inherit$/],
-    'background-color': [HEX],
-    'font-size': [/^(1[0-9]|2[0-9]|3[0-6])px$/],
-    'line-height': [/^(1|1\.15|1\.5|2|2\.5|3)$/],
-    'margin-left': [/^([2468]|1[0246])em$/],
-  },
-};
-const STYLED = ['p', 'h2', 'h3', 'h4', 'span', 'mark'];
-
 const OPTIONS: sanitize.IOptions = {
-  allowedTags: ['p', 'br', 'strong', 'b', 'em', 'i', 'u', 's', 'sub', 'sup', 'mark', 'h2', 'h3', 'h4', 'ul', 'ol', 'li', 'blockquote', 'hr', 'table', 'thead', 'tbody', 'tr', 'th', 'td', 'a', 'span', 'ins', 'del'],
+  allowedTags: ['p', 'br', 'strong', 'b', 'em', 'i', 'u', 's', 'h2', 'h3', 'h4', 'ul', 'ol', 'li', 'blockquote', 'hr', 'table', 'thead', 'tbody', 'tr', 'th', 'td', 'a', 'span', 'ins', 'del'],
   allowedAttributes: {
     a: ['href', 'target', 'rel'],
     th: ['colspan', 'rowspan'],
     td: ['colspan', 'rowspan'],
     ins: ['class'],
     del: ['class'],
-    ...Object.fromEntries(STYLED.map((t) => [t, ['style']])),
   },
-  allowedStyles: STYLES,
   allowedSchemes: ['https', 'http', 'mailto'],
   allowedClasses: { ins: ['diff-ins'], del: ['diff-del'] },
   transformTags: {

@@ -153,7 +153,7 @@ Terraform จะไม่เขียนทับค่าใน secret นี�
 
 ## 8) CI/CD ผ่าน GitHub Actions
 
-หลังตั้งค่าครั้งเดียว ทุกครั้งที่ push เข้า `main` ระบบจะ:
+หลังตั้งค่าครั้งเดียว ทุกครั้งที่ push เข้า `master` ระบบจะ:
 **typecheck + test → build image (api, web) → push ECR → deploy ECS → รอจนเสถียร** (ถ้า API สตาร์ทไม่ขึ้น
 ECS จะ rollback เวอร์ชันเดิมให้อัตโนมัติ) ไม่ต้องเก็บ AWS access key ไว้ใน GitHub เพราะใช้ OIDC
 
@@ -178,7 +178,7 @@ role ของ GitHub push image และ deploy ได้อย่างเด
    - แท็บ **Secrets** → New repository secret: `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` (ค่าจากข้อ 2)
    - แท็บ **Variables** → New repository variable: `AWS_REGION` = region ใน tfvars (เช่น `ap-southeast-2`)
    - (ถ้าเปิดเว็บบริษัท) Variable `ENABLE_SITE` = `true`
-4. ย้าย workflow เข้าที่: `Move-Item infra\github-workflows\*.yml .github\workflows\` แล้ว commit + push ขึ้น `main`
+4. ย้าย workflow เข้าที่: `Move-Item infra\github-workflows\*.yml .github\workflows\` แล้ว commit + push ขึ้น `master`
 5. (แนะนำ) Settings → Environments → **production** → Required reviewers → ใส่ตัวเอง
 
 บัญชี AWS แบบ Free plan ใหม่ห้ามสร้าง OIDC provider (SCP) จึงใช้ access key เป็นค่าเริ่มต้น
@@ -192,6 +192,24 @@ role ของ GitHub push image และ deploy ได้อย่างเด
 - Terraform ไม่ย้อน image ที่ GitHub deploy ไป (service ตั้ง `ignore_changes = [task_definition]`);
   ถ้าแก้ env/secret ผ่าน Terraform ค่าใหม่จะมีผลใน deploy ครั้งถัดไป หรือสั่ง Run workflow เพื่อ deploy ทันที
 - `deploy.ps1` (ไม่ใส่ `-InfraOnly`) ยังใช้ deploy จากเครื่องได้เหมือนเดิม
+
+## 9) ย้ายข้อมูลทั้งหมดจากเครื่อง (docker) ขึ้น AWS
+
+```powershell
+npm run db:up                                   # Postgres บนเครื่องต้องรันอยู่
+.\infra\scripts\deploy.ps1 -InfraOnly          # ครั้งแรก: สร้าง task dbtool
+.\infra\scripts\migrate-local-db.ps1           # พิมพ์ YES เพื่อยืนยัน
+```
+
+สคริปต์จะ: pg_dump ฐานข้อมูลบนเครื่อง → อัปโหลดขึ้น S3 (ลิงก์ชั่วคราว 1 ชม.) → หยุด portal →
+restore ลง RDS ผ่าน Fargate task (RDS ไม่มี public endpoint) → ลบ session ทั้งหมด → ลบ dump ใน S3 →
+sync `apps\api\var\uploads` ไป `s3://<bucket>/evidence/` → เปิด portal
+
+- **ข้อมูลบน AWS เดิมถูกแทนที่ทั้งหมด** (รวม admin ที่สร้างด้วย bootstrap-admin)
+- username/รหัสผ่านใช้ได้เหมือนเดิม (hash scrypt ย้ายไปตรง ๆ) ทุกคนต้องล็อกอินใหม่หนึ่งครั้ง
+- ลิงก์ตั้งรหัสผ่านที่ออกบนเครื่อง (localhost) ใช้ไม่ได้ ต้องออกใหม่
+- ผู้ใช้ทดสอบ `@pas.test` จาก db:seed จะติดไปด้วย — ปิดใช้งาน/ลบในหน้า พนักงานและสิทธิ์
+- `infra\.migrate\pas.dump` เก็บข้อมูลทั้งหมด (git-ignored) ลบทิ้งได้เมื่อเสร็จ
 
 ## หมายเหตุด้านความปลอดภัย
 

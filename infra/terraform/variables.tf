@@ -91,3 +91,28 @@ variable "log_retention_days" {
   type    = number
   default = 7
 }
+
+# ---------- n8n (optional, see n8n.tf) ----------
+variable "enable_n8n" {
+  description = "Run n8n on the cluster (needs domain_name and n8n_domain_name)."
+  type        = bool
+  default     = false
+}
+
+variable "n8n_domain_name" {
+  description = "n8n host name, e.g. n8n.pas-acc.com."
+  type        = string
+  default     = ""
+}
+
+variable "n8n_image" {
+  description = "n8n container image. Pin a version (e.g. n8nio/n8n:1.123.4) to control upgrades; a new tag = an upgrade on the next apply."
+  type        = string
+  default     = "n8nio/n8n:latest"
+}
+
+variable "n8n_editor_allowed_cidrs" {
+  description = "Limit the n8n editor/UI to these IP ranges (e.g. [\"203.0.113.10/32\"] = office IP). Webhooks and forms stay public. Empty = open."
+  type        = list(string)
+  default     = []
+}

@@ -27,7 +27,7 @@ resource "aws_iam_role_policy_attachment" "execution_managed" {
 data "aws_iam_policy_document" "execution_secrets" {
   statement {
     actions   = ["secretsmanager:GetSecretValue"]
-    resources = [aws_secretsmanager_secret.app.arn, aws_secretsmanager_secret.integrations.arn]
+    resources = concat([aws_secretsmanager_secret.app.arn, aws_secretsmanager_secret.integrations.arn], aws_secretsmanager_secret.n8n[*].arn)
   }
 }
 

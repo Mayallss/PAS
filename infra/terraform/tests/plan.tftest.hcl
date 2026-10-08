@@ -77,3 +77,64 @@ run "github_oidc_mode" {
     error_message = "github oidc role"
   }
 }
+
+run "n8n_open" {
+  command = apply
+  variables {
+    alert_email     = "a@b.com"
+    domain_name     = "portal.example.com"
+    enable_n8n      = true
+    n8n_domain_name = "n8n.example.com"
+  }
+  assert {
+    condition     = length(aws_ecs_service.n8n) == 1 && length(aws_lb_listener_rule.n8n_open) == 1 && length(aws_lb_listener_rule.n8n_deny) == 0
+    error_message = "n8n open"
+  }
+  assert {
+    condition     = strcontains(aws_ecs_task_definition.n8n[0].container_definitions, "WEBHOOK_URL") && strcontains(aws_ecs_task_definition.n8n[0].container_definitions, "CREATE DATABASE n8n OWNER n8n")
+    error_message = "n8n env / init script"
+  }
+  assert {
+    condition     = strcontains(aws_ecs_task_definition.n8n_tool[0].container_definitions, "\"entryPoint\":[\"sh\",\"-c\"]") && strcontains(aws_ecs_task_definition.n8n[0].container_definitions, "N8N_BLOCK_ENV_ACCESS_IN_NODE")
+    error_message = "n8n tool task / env block"
+  }
+}
+
+run "n8n_editor_restricted" {
+  command = apply
+  variables {
+    alert_email              = "a@b.com"
+    domain_name              = "portal.example.com"
+    enable_n8n               = true
+    n8n_domain_name          = "n8n.example.com"
+    n8n_editor_allowed_cidrs = ["203.0.113.10/32"]
+  }
+  assert {
+    condition     = length(aws_lb_listener_rule.n8n_editor) == 1 && length(aws_lb_listener_rule.n8n_deny) == 1
+    error_message = "n8n restricted"
+  }
+}
+
+run "n8n_needs_domain" {
+  command = plan
+  variables {
+    alert_email     = "a@b.com"
+    enable_n8n      = true
+    n8n_domain_name = "n8n.example.com"
+  }
+  expect_failures = [terraform_data.n8n_requirements]
+}
+
+run "n8n_no_cr_in_script" {
+  command = apply
+  variables {
+    alert_email     = "a@b.com"
+    domain_name     = "portal.example.com"
+    enable_n8n      = true
+    n8n_domain_name = "n8n.example.com"
+  }
+  assert {
+    condition     = !strcontains(aws_ecs_task_definition.n8n[0].container_definitions, "\\r")
+    error_message = "CR in init script"
+  }
+}

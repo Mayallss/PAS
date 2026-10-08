@@ -265,3 +265,27 @@ resource "aws_ecs_service" "site" {
 
   depends_on = [aws_lb_listener.http, aws_ecs_cluster_capacity_providers.main]
 }
+
+# ---------- one-off DB tool (pg_dump / pg_restore) — used by infra/scripts/migrate-local-db.ps1 ----------
+# RDS has no public endpoint, so restores run inside the VPC as a short-lived Fargate task.
+resource "aws_ecs_task_definition" "dbtool" {
+  family                   = "${local.name}-dbtool"
+  requires_compatibilities = ["FARGATE"]
+  network_mode             = "awsvpc"
+  cpu                      = 256
+  memory                   = 512
+  execution_role_arn       = aws_iam_role.execution.arn
+  runtime_platform {
+    operating_system_family = "LINUX"
+    cpu_architecture        = "X86_64"
+  }
+  container_definitions = jsonencode([{
+    name             = "dbtool"
+    image            = "public.ecr.aws/docker/library/postgres:16-alpine"
+    essential        = true
+    command          = ["sh", "-c", "echo override the command"]
+    environment      = [{ name = "PGSSLMODE", value = "require" }]
+    secrets          = [{ name = "DATABASE_URL", valueFrom = "${aws_secretsmanager_secret.app.arn}:DATABASE_URL::" }]
+    logConfiguration = local.log_config["jobs"]
+  }])
+}

@@ -53,3 +53,25 @@ describe('diffHtml', () => {
     expect(diffHtml('<p>same</p>', '<p>same</p>')).toEqual({ html: '<p>same</p>', added: 0, removed: 0 });
   });
 });
+
+describe('Word-style formatting (editor tools 2026-10-08)', () => {
+  it('keeps the editor formatting: alignment, colour, highlight, size, line spacing, indent, sub/superscript', () => {
+    const html =
+      '<p style="text-align: center; line-height: 1.5; margin-left: 4em">หัว</p>' +
+      '<p><span style="color: #b91c1c; font-size: 18px">แดง</span> <mark style="background-color: #fef08a; color: inherit">เน้น</mark> H<sub>2</sub>O x<sup>2</sup></p>';
+    // The sanitiser normalises spacing inside style="" (the editor reads either form back the same).
+    expect(sanitizeRichText(html)).toBe(html.replace(/: /g, ':').replace(/; /g, ';'));
+  });
+
+  it('strips any style property or value outside the fixed patterns', () => {
+    const out = sanitizeRichText(
+      '<p style="position: fixed; top: 0; text-align: center">a</p>' +
+        '<span style="color: red; background-color: url(x); font-size: 999px">b</span>' +
+        '<span style="background-image: url(javascript:alert(1)); color: #12345">c</span>' +
+        '<p style="margin-left: 100em; line-height: 9">d</p>' +
+        '<td style="color: #000000">e</td>',
+    );
+    expect(out).toBe('<p style="text-align:center">a</p><span>b</span><span>c</span><p>d</p><td>e</td>');
+    expect(out).not.toMatch(/position|url|javascript|999|100em/);
+  });
+});
