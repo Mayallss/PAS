@@ -46,6 +46,12 @@ export class ReportsController {
     return this.cost.customerCost(user, q.from, q.to, q.basis);
   }
 
+  /** Entry rows for the interactive report (group / filter / drill on the page). Money only with cost.read. */
+  @Get('analytics')
+  analytics(@CurrentUser() user: AuthUser, @Query(new ZodPipe(costQuery)) q: z.infer<typeof costQuery>) {
+    return this.cost.analytics(user, q.from, q.to, q.basis);
+  }
+
   @Get('customer-cost/:customerId')
   @RequirePermission('cost.read')
   customerCostDetail(@CurrentUser() user: AuthUser, @Param('customerId', ParseUUIDPipe) customerId: string, @Query(new ZodPipe(costQuery)) q: z.infer<typeof costQuery>) {

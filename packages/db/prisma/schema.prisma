@@ -275,6 +275,8 @@ model Employee {
   requestUpdates      ServiceRequestUpdate[]
   todos               TodoItem[]             @relation("TodoAssignee")
   licenseSeats        LicenseAssignment[]    @relation("SeatEmployee")
+  revenueImports      RevenueBatch[]         @relation("RevenueBatchCreator")
+  revenueVoids        RevenueBatch[]         @relation("RevenueBatchVoider")
   licenseSeatsMade    LicenseAssignment[]    @relation("SeatCreator")
   todosCreated        TodoItem[]             @relation("TodoCreator")
   leaveRequests       LeaveRequest[]         @relation("LeaveRequester")
@@ -388,18 +390,21 @@ model ScheduleAssignment {
 // ---------------------------------------------------------------------------
 
 model Customer {
-  id             String       @id @default(uuid()) @db.Uuid
+  id             String         @id @default(uuid()) @db.Uuid
   /// Business code shown to users (legacy company_id). Editable without touching foreign keys.
-  code           String       @unique
+  code           String         @unique
   name           String
-  taxId          String?      @map("tax_id")
+  taxId          String?        @map("tax_id")
+  /// Contact code (#code) of this customer in TRCLOUD — invoices are linked by it. Set by the contact sync.
+  trcloudCode    String?        @unique @map("trcloud_code")
   address        String?
-  accountOwnerId String?      @map("account_owner_id") @db.Uuid
-  accountOwner   Employee?    @relation("CustomerOwner", fields: [accountOwnerId], references: [id])
-  isActive       Boolean      @default(true) @map("is_active")
+  accountOwnerId String?        @map("account_owner_id") @db.Uuid
+  accountOwner   Employee?      @relation("CustomerOwner", fields: [accountOwnerId], references: [id])
+  isActive       Boolean        @default(true) @map("is_active")
   engagements    Engagement[]
-  createdAt      DateTime     @default(now()) @map("created_at")
-  updatedAt      DateTime     @updatedAt @map("updated_at")
+  createdAt      DateTime       @default(now()) @map("created_at")
+  updatedAt      DateTime       @updatedAt @map("updated_at")
+  revenueEntries RevenueEntry[]
 
   @@map("customer")
 }
@@ -1410,4 +1415,66 @@ model LocalCredential {
   updatedAt         DateTime  @updatedAt @map("updated_at")
 
   @@map("local_credential")
+}
+
+// ---------------------------------------------------------------------------
+// Revenue (รายได้) — imported per batch, matched to customers, compared with cost in reports.
+// ---------------------------------------------------------------------------
+
+enum RevenueSource {
+  EXCEL
+  /// Pulled from the accounting system directly (connector not built yet — same ingest path).
+  API
+}
+
+/// One import: an Excel file or one pull from the source system. Voided, never deleted (the numbers fed reports).
+model RevenueBatch {
+  id          String         @id @default(uuid()) @db.Uuid
+  source      RevenueSource
+  fileName    String?        @map("file_name")
+  /// The source system's id for this pull; with `source` it makes a re-sent pull idempotent.
+  externalRef String?        @map("external_ref")
+  /// sha256 of the parsed rows: the same file imported twice is caught.
+  contentHash String         @map("content_hash")
+  /// The period the income belongs to (the file has no dates; chosen at import).
+  periodFrom  DateTime       @map("period_from") @db.Date
+  periodTo    DateTime       @map("period_to") @db.Date
+  rowCount    Int            @map("row_count")
+  totalAmount Decimal        @map("total_amount") @db.Decimal(16, 2)
+  note        String?
+  createdById String         @map("created_by_id") @db.Uuid
+  createdBy   Employee       @relation("RevenueBatchCreator", fields: [createdById], references: [id])
+  createdAt   DateTime       @default(now()) @map("created_at")
+  voidedAt    DateTime?      @map("voided_at")
+  voidedById  String?        @map("voided_by_id") @db.Uuid
+  voidedBy    Employee?      @relation("RevenueBatchVoider", fields: [voidedById], references: [id])
+  voidReason  String?        @map("void_reason")
+  entries     RevenueEntry[]
+
+  @@unique([source, externalRef])
+  @@index([periodFrom, periodTo])
+  @@map("revenue_batch")
+}
+
+/// One line of income as the source gave it. customerId is null until it is matched (by tax id, name or a person).
+model RevenueEntry {
+  id          String       @id @default(uuid()) @db.Uuid
+  batchId     String       @map("batch_id") @db.Uuid
+  batch       RevenueBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  rowNo       Int          @map("row_no")
+  taxId       String?      @map("tax_id")
+  companyName String       @map("company_name")
+  amount      Decimal      @db.Decimal(16, 2)
+  customerId  String?      @map("customer_id") @db.Uuid
+  customer    Customer?    @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  /// Source document (TRCLOUD invoice / credit note number). Null for Excel rows.
+  docNo       String?      @map("doc_no")
+  /// Date of the source document: such a row counts on this day instead of being spread over the batch period.
+  docDate     DateTime?    @map("doc_date") @db.Date
+  /// How the customer was found: TAX_ID / NAME (automatic) or MANUAL (a person chose it).
+  matchedBy   String?      @map("matched_by")
+
+  @@index([batchId])
+  @@index([customerId])
+  @@map("revenue_entry")
 }

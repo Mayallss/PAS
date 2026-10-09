@@ -8,6 +8,7 @@ import type { AppRequest } from '../../common/request-context';
 import { AccessService } from '../authorization/access.service';
 import { AuditService } from '../audit/audit.service';
 import type { AuthUser } from '../auth/auth.types';
+import { RevenueService } from '../revenue/revenue.service';
 
 type Tx = Prisma.TransactionClient;
 
@@ -50,6 +51,7 @@ export class CostService {
     private readonly prisma: PrismaService,
     private readonly access: AccessService,
     private readonly audit: AuditService,
+    private readonly revenue: RevenueService,
   ) {}
 
   private today() {
@@ -137,10 +139,10 @@ export class CostService {
         id: true,
         workDate: true,
         durationMinutes: true,
-        employee: { select: { id: true, fullName: true, nickname: true, levelId: true } },
+        employee: { select: { id: true, fullName: true, nickname: true, levelId: true, orgUnit: { select: { name: true } } } },
         engagement: {
           select: {
-            workCategory: { select: { name: true, type: true } },
+            workCategory: { select: { id: true, name: true, type: true } },
             customer: { select: { id: true, code: true, name: true, accountOwner: { select: { fullName: true } } } },
           },
         },
@@ -241,6 +243,73 @@ export class CostService {
         .map((t) => ({ type: t, ...fix(internal.get(t)!) })),
       total: fix(total),
       missing,
+    };
+  }
+
+  /**
+   * Flat rows for the interactive report: one per time entry, with customer / activity / person as indexes into
+   * small lists so a year of entries stays compact. The page groups, filters and drills client-side.
+   * Same scope and pricing as customerCost(); money only for cost.read — everyone else gets hours (cost = null).
+   */
+  async analytics(user: AuthUser, from: string, to: string, basis: LevelBasis) {
+    const priced = user.permissions.includes('cost.read');
+    const entries = await this.loadEntries(user, from, to);
+    const p = await this.pricer([...new Set(entries.map((e) => e.employee.id))], basis);
+    const lookup = <T>() => {
+      const at = new Map<string, number>();
+      const list: T[] = [];
+      return {
+        list,
+        index(id: string, make: () => T) {
+          let i = at.get(id);
+          if (i === undefined) {
+            i = list.push(make()) - 1;
+            at.set(id, i);
+          }
+          return i;
+        },
+      };
+    };
+    const customers = lookup<{ id: string; code: string; name: string; owner: string | null }>();
+    const activities = lookup<{ id: string; name: string; type: WorkCategoryType }>();
+    const employees = lookup<{ id: string; name: string; team: string | null }>();
+    // [date, customer, activity, employee, level code, minutes, cost | null]
+    const rows: [string, number, number, number, string, number, number | null][] = [];
+    for (const e of entries) {
+      const date = toIsoDate(e.workDate);
+      const price = p.price(e.employee, date, e.durationMinutes);
+      const c = e.engagement.customer;
+      const a = e.engagement.workCategory;
+      rows.push([
+        date,
+        customers.index(c.id, () => ({ id: c.id, code: c.code, name: c.name, owner: c.accountOwner?.fullName ?? null })),
+        activities.index(a.id, () => ({ id: a.id, name: a.name, type: a.type })),
+        employees.index(e.employee.id, () => ({
+          id: e.employee.id,
+          name: `${e.employee.fullName}${e.employee.nickname ? ` (${e.employee.nickname})` : ''}`,
+          team: e.employee.orgUnit?.name ?? null,
+        })),
+        price.level,
+        e.durationMinutes,
+        priced && price.cost !== null ? round2(price.cost) : null,
+      ]);
+    }
+    // Revenue is per customer, for the whole company. Against a team-scoped cost it would overstate profit, so
+    // it is shown only to readers who see the cost of every team.
+    const companyWide = priced && (await this.access.reportScope(user)).all;
+    return {
+      from,
+      to,
+      basis,
+      priced,
+      revenue: companyWide ? await this.revenue.forRange(from, to) : null,
+      revenueHidden: companyWide ? null : priced ? ('TEAM_SCOPE' as const) : ('NO_COST_PERMISSION' as const),
+      units: priced ? p.unitsUsed() : [],
+      levels: p.levels.map(({ code, name }) => ({ code, name })),
+      customers: customers.list,
+      activities: activities.list,
+      employees: employees.list,
+      rows,
     };
   }
 

@@ -86,13 +86,13 @@ export function SidebarNav({ pathname, onOpenPalette }: { pathname: string; onOp
     const external = a.kind === 'EXTERNAL';
     const pinned = a.favorite !== null;
     const cls = `flex h-9 min-w-0 flex-1 items-center gap-2.5 rounded-lg px-2.5 text-sm transition-colors ${
-      active ? 'bg-white font-medium text-gray-900 shadow-card ring-1 ring-gray-200' : 'text-gray-600 hover:bg-gray-200/60 hover:text-gray-900'
+      active ? 'bg-white font-medium text-gray-900 shadow-card ring-1 ring-gray-300' : 'text-gray-700 hover:bg-gray-300/50 hover:text-gray-900'
     }`;
     const content = (
       <>
-        <AppIcon icon={a.icon} className={`h-4 w-4 shrink-0 ${active ? 'text-brand-600' : 'text-gray-400'}`} />
+        <AppIcon icon={a.icon} className={`h-4 w-4 shrink-0 ${active ? 'text-brand-600' : 'text-gray-500'}`} />
         <span className="truncate">{a.name}</span>
-        {external && <ArrowUpRight className="ml-auto h-3.5 w-3.5 shrink-0 text-gray-300" aria-label="(เปิดแท็บใหม่)" />}
+        {external && <ArrowUpRight className="ml-auto h-3.5 w-3.5 shrink-0 text-gray-500" aria-label="(เปิดแท็บใหม่)" />}
       </>
     );
     return (
@@ -144,7 +144,7 @@ export function SidebarNav({ pathname, onOpenPalette }: { pathname: string; onOp
           onClick={() => toggleFavorite(a.key)}
           aria-label={pinned ? `เอา ${a.name} ออกจากรายการโปรด` : `เพิ่ม ${a.name} ในรายการโปรด`}
           aria-pressed={pinned}
-          className={`ml-0.5 shrink-0 rounded-md p-1 transition ${pinned ? 'text-amber-500' : 'text-gray-300 opacity-0 group-hover:opacity-100 focus:opacity-100'} hover:bg-gray-200/60`}
+          className={`ml-0.5 shrink-0 rounded-md p-1 transition ${pinned ? 'text-amber-500' : 'text-gray-500 opacity-0 group-hover:opacity-100 focus:opacity-100'} hover:bg-gray-300/50`}
         >
           <Star className="h-3.5 w-3.5" fill={pinned ? 'currentColor' : 'none'} />
         </button>
@@ -156,7 +156,7 @@ export function SidebarNav({ pathname, onOpenPalette }: { pathname: string; onOp
     const closed = collapsed.includes(name);
     return (
       <div key={name}>
-        <button type="button" onClick={() => toggleGroup(name)} aria-expanded={!closed} className="mb-1 flex w-full items-center gap-1.5 px-2.5 text-[11px] font-semibold tracking-wider text-gray-400 uppercase hover:text-gray-600">
+        <button type="button" onClick={() => toggleGroup(name)} aria-expanded={!closed} className="mb-1 flex w-full items-center gap-1.5 px-2.5 text-[11px] font-semibold tracking-wider text-gray-600 uppercase hover:text-gray-900">
           {icon}
           <span className="flex-1 text-left">{name}</span>
           <ChevronDown className={`h-3.5 w-3.5 transition-transform ${closed ? '-rotate-90' : ''}`} aria-hidden />
@@ -171,7 +171,7 @@ export function SidebarNav({ pathname, onOpenPalette }: { pathname: string; onOp
       <button
         type="button"
         onClick={onOpenPalette}
-        className="flex h-9 shrink-0 items-center gap-2 rounded-lg bg-white px-2.5 text-[13px] text-gray-500 shadow-card ring-1 ring-gray-200 hover:text-gray-700"
+        className="flex h-9 shrink-0 items-center gap-2 rounded-lg bg-white px-2.5 text-[13px] text-gray-600 shadow-card ring-1 ring-gray-300 hover:text-gray-800 hover:ring-gray-400"
       >
         <Search className="h-4 w-4" aria-hidden />
         <span className="flex-1 text-left">ค้นหา / ไปที่…</span>
@@ -183,9 +183,9 @@ export function SidebarNav({ pathname, onOpenPalette }: { pathname: string; onOp
           <Link
             href="/"
             aria-current={pathname === '/' ? 'page' : undefined}
-            className={`flex h-9 items-center gap-2.5 rounded-lg px-2.5 text-sm ${pathname === '/' ? 'bg-white font-medium text-gray-900 shadow-card ring-1 ring-gray-200' : 'text-gray-600 hover:bg-gray-200/60 hover:text-gray-900'}`}
+            className={`flex h-9 items-center gap-2.5 rounded-lg px-2.5 text-sm ${pathname === '/' ? 'bg-white font-medium text-gray-900 shadow-card ring-1 ring-gray-300' : 'text-gray-700 hover:bg-gray-300/50 hover:text-gray-900'}`}
           >
-            <House className={`h-4 w-4 ${pathname === '/' ? 'text-brand-600' : 'text-gray-400'}`} aria-hidden /> หน้าหลัก
+            <House className={`h-4 w-4 ${pathname === '/' ? 'text-brand-600' : 'text-gray-500'}`} aria-hidden /> หน้าหลัก
           </Link>
         </li>
       </ul>
@@ -197,13 +197,13 @@ export function SidebarNav({ pathname, onOpenPalette }: { pathname: string; onOp
       ) : (
         <>
           <div>
-            <p className="mb-1 flex items-center gap-1.5 px-2.5 text-[11px] font-semibold tracking-wider text-gray-400 uppercase">
+            <p className="mb-1 flex items-center gap-1.5 px-2.5 text-[11px] font-semibold tracking-wider text-gray-600 uppercase">
               <Star className="h-3 w-3" aria-hidden /> รายการโปรด
             </p>
             {favorites.length ? (
               <ul className="space-y-0.5">{favorites.map((a) => item(a, { inFavorites: true }))}</ul>
             ) : (
-              <p className="px-2.5 text-[12px] leading-snug text-gray-400">กด ☆ ที่เมนูด้านล่างเพื่อปักหมุดแอปที่ใช้บ่อย</p>
+              <p className="px-2.5 text-[12px] leading-snug text-gray-600">กด ☆ ที่เมนูด้านล่างเพื่อปักหมุดแอปที่ใช้บ่อย</p>
             )}
           </div>
           {[...groups.entries()].map(([name, list]) => section(name, list))}

@@ -31,20 +31,19 @@ import {
 import { useEffect, useRef, useState } from 'react';
 import { Alert, Button, inputClass } from '@/components/ui';
 import { ApiError, errorMessage } from '@/lib/api';
-import { type HandoffItem, type Outcome, OUTCOMES, type SaveBody, type SaveResult, statusTone } from '@/lib/handoffs';
+import { handoffDate, type HandoffItem, type Outcome, OUTCOMES, type SaveBody, type SaveResult, statusTone } from '@/lib/handoffs';
 
-const OUTCOME_ICON = { '1': CircleCheck, '0': TriangleAlert, '2': CircleX } as const;
-const TONE = {
+const OUTCOME_ICON = { '1': CircleCheck, '0': TriangleAlert, '2': CircleX } as const;const TONE = {
   done: 'bg-emerald-50 text-emerald-700 ring-emerald-200',
   issue: 'bg-amber-50 text-amber-800 ring-amber-200',
-  open: 'bg-gray-100 text-gray-600 ring-gray-200',
+  open: 'bg-gray-100 text-gray-700 ring-gray-300',
 };
 
 export function StatusPill({ status, children }: { status: string; children?: React.ReactNode }) {
   const tone = statusTone(status);
   const Icon = tone === 'done' ? CircleCheck : tone === 'issue' ? TriangleAlert : Clock3;
   return (
-    <span className={`inline-flex max-w-full items-center gap-1 rounded-full px-2 py-0.5 text-[11.5px] font-medium ring-1 ring-inset ${TONE[tone]}`}>
+    <span className={`inline-flex max-w-full items-center gap-1 rounded-full px-2 py-0.5 text-[12px] font-medium ring-1 ring-inset ${TONE[tone]}`}>
       <Icon className="h-3.5 w-3.5 shrink-0" aria-hidden />
       <span className="truncate">{children ?? (status || 'ยังไม่ระบุสถานะ')}</span>
     </span>
@@ -53,9 +52,9 @@ export function StatusPill({ status, children }: { status: string; children?: Re
 
 function Chip({ icon: Icon, children }: { icon: typeof Hash; children: React.ReactNode }) {
   return (
-    <span className="inline-flex items-center gap-1 rounded-md bg-gray-100 px-2 py-0.5 text-[12px] text-gray-700">
-      <Icon className="h-3.5 w-3.5 text-gray-400" aria-hidden />
-      {children}
+    <span className="inline-flex max-w-full items-center gap-1 rounded-md bg-gray-100 px-2 py-0.5 text-[12px] text-gray-700 ring-1 ring-gray-200 ring-inset">
+      <Icon className="h-3.5 w-3.5 shrink-0 text-gray-500" aria-hidden />
+      <span className="min-w-0 [overflow-wrap:anywhere]">{children}</span>
     </span>
   );
 }
@@ -71,49 +70,50 @@ export function ItemDetails({ item, status }: { item: HandoffItem; status?: stri
     [MapPin, 'สถานที่เพิ่มเติม', item.location],
   ];
   return (
-    <section className="rounded-xl bg-white shadow-card ring-1 ring-gray-200/80">
-      <div className="space-y-3 p-5">
-        <p className="flex items-center gap-1.5 text-[11px] font-semibold tracking-wider text-brand-600 uppercase">
+    <section className="min-w-0 rounded-xl bg-white shadow-card ring-1 ring-gray-300/80">
+      <div className="space-y-3 p-4 sm:p-5">
+        <p className="flex items-center gap-1.5 text-[12px] font-semibold tracking-wider text-brand-600 uppercase">
           <FileText className="h-3.5 w-3.5" aria-hidden /> รายละเอียดรายการ
         </p>
-        <h2 className="text-lg leading-snug font-semibold text-gray-900">{item.customer}</h2>
+        <h2 className="text-lg leading-snug font-semibold [overflow-wrap:anywhere] text-gray-900">{item.customer}</h2>
         <div className="flex flex-wrap items-center gap-1.5">
           <Chip icon={Hash}>{item.id}</Chip>
-          <Chip icon={CalendarDays}>{item.date || 'ไม่ระบุวันที่'}</Chip>
+          <Chip icon={CalendarDays}>{item.date ? handoffDate(item.date) : 'ไม่ระบุวันที่'}</Chip>
           {item.period && <Chip icon={Clock3}>{item.period}</Chip>}
           <StatusPill status={status ?? item.status} />
         </div>
       </div>
-      <details className="group border-t border-gray-100" open={wide} key={String(wide)}>
-        <summary className="flex cursor-pointer list-none items-center justify-between px-5 py-3 text-[13px] font-medium text-gray-700 hover:bg-gray-50">
+      <details className="group border-t border-gray-200" open={wide} key={String(wide)}>
+        <summary className="flex cursor-pointer list-none items-center justify-between px-4 py-3 text-[13px] font-medium text-gray-800 hover:bg-gray-50 sm:px-5">
           <span className="flex items-center gap-1.5">
-            <ClipboardCheck className="h-4 w-4 text-gray-400" aria-hidden /> รายละเอียดทั้งหมด
+            <ClipboardCheck className="h-4 w-4 text-gray-500" aria-hidden /> รายละเอียดทั้งหมด
           </span>
-          <ChevronDown className="h-4 w-4 text-gray-400 transition-transform group-open:rotate-180" aria-hidden />
+          <ChevronDown className="h-4 w-4 text-gray-500 transition-transform group-open:rotate-180" aria-hidden />
         </summary>
-        <div className="space-y-4 px-5 pb-5">
-          <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-[13px]">
+        <div className="space-y-4 px-4 pb-5 sm:px-5">
+          {/* minmax(0,1fr) + overflow-wrap: a long e-mail, link or reference from monday wraps instead of widening the page. */}
+          <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-2 text-[13px]">
             {meta
               .filter(([, label, value]) => value || label !== 'สถานที่เพิ่มเติม')
               .map(([Icon, label, value]) => (
                 <div key={label} className="contents">
-                  <dt className="flex items-center gap-1.5 text-gray-500">
-                    <Icon className="h-3.5 w-3.5" aria-hidden /> {label}
+                  <dt className="flex items-start gap-1.5 whitespace-nowrap text-gray-600">
+                    <Icon className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden /> {label}
                   </dt>
-                  <dd className="text-gray-900">{value || '—'}</dd>
+                  <dd className="min-w-0 [overflow-wrap:anywhere] text-gray-900">{value || '—'}</dd>
                 </div>
               ))}
           </dl>
           {item.documents.length > 0 && (
             <div>
-              <h3 className="mb-2 text-[12px] font-semibold text-gray-500">เอกสารในรายการ</h3>
-              <ul className="divide-y divide-gray-100 rounded-lg ring-1 ring-gray-200">
+              <h3 className="mb-2 text-[12px] font-semibold text-gray-600">เอกสารในรายการ</h3>
+              <ul className="divide-y divide-gray-200 rounded-lg ring-1 ring-gray-300">
                 {item.documents.map((d) => (
                   <li key={d.title} className="flex items-start gap-2.5 px-3 py-2">
                     <FileText className="mt-0.5 h-4 w-4 shrink-0 text-brand-500" aria-hidden />
                     <div className="min-w-0 text-[13px]">
-                      <p className="font-medium text-gray-900">{d.title}</p>
-                      <p className="break-words text-gray-600">
+                      <p className="font-medium [overflow-wrap:anywhere] text-gray-900">{d.title}</p>
+                      <p className="[overflow-wrap:anywhere] text-gray-600">
                         {d.detail || '—'}
                         {d.quantity && <span className="text-gray-500"> · จำนวน {d.quantity}</span>}
                       </p>
@@ -125,15 +125,15 @@ export function ItemDetails({ item, status }: { item: HandoffItem; status?: stri
           )}
           {item.note && (
             <div>
-              <h3 className="mb-1.5 flex items-center gap-1.5 text-[12px] font-semibold text-gray-500">
+              <h3 className="mb-1.5 flex items-center gap-1.5 text-[12px] font-semibold text-gray-600">
                 <PenLine className="h-3.5 w-3.5" aria-hidden /> หมายเหตุจาก monday
               </h3>
-              <p className="rounded-lg bg-amber-50/60 px-3 py-2 text-[13px] whitespace-pre-line text-gray-800">{item.note}</p>
+              <p className="rounded-lg bg-amber-50 px-3 py-2 text-[13px] whitespace-pre-line [overflow-wrap:anywhere] text-gray-800 ring-1 ring-amber-200 ring-inset">{item.note}</p>
             </div>
           )}
         </div>
       </details>
-      <p className="flex items-center gap-1.5 border-t border-gray-100 px-5 py-2.5 text-[12px] text-gray-500">
+      <p className="flex items-center gap-1.5 border-t border-gray-200 px-4 py-2.5 text-[12px] text-gray-600 sm:px-5">
         <Paperclip className="h-3.5 w-3.5" aria-hidden /> หลักฐานเดิม {item.files.length} ไฟล์
       </p>
     </section>
@@ -370,7 +370,7 @@ export function SignForm({
 
   if (success) {
     return (
-      <section className="rounded-xl bg-white p-6 text-center shadow-card ring-1 ring-gray-200/80">
+      <section className="min-w-0 rounded-xl bg-white p-6 text-center shadow-card ring-1 ring-gray-300/80">
         <span className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-full bg-emerald-50 text-emerald-600 ring-8 ring-emerald-50/60">
           <CheckCheck className="h-7 w-7" aria-hidden />
         </span>
@@ -378,16 +378,16 @@ export function SignForm({
         <div className="mt-2">
           <StatusPill status={success} />
         </div>
-        <dl className="mx-auto mt-5 grid max-w-sm grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-left text-[13px]">
-          <dt className="flex items-center gap-1.5 text-gray-500">
+        <dl className="mx-auto mt-5 grid max-w-sm grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-2 text-left text-[13px]">
+          <dt className="flex items-center gap-1.5 whitespace-nowrap text-gray-600">
             <Hash className="h-3.5 w-3.5" aria-hidden /> เลขที่รายการ
           </dt>
           <dd className="font-medium text-gray-900">{item.id}</dd>
-          <dt className="flex items-center gap-1.5 text-gray-500">
+          <dt className="flex items-center gap-1.5 whitespace-nowrap text-gray-600">
             <User className="h-3.5 w-3.5" aria-hidden /> ผู้เซ็น
           </dt>
-          <dd className="font-medium text-gray-900">{name}</dd>
-          <dt className="flex items-center gap-1.5 text-gray-500">
+          <dd className="font-medium [overflow-wrap:anywhere] text-gray-900">{name}</dd>
+          <dt className="flex items-center gap-1.5 whitespace-nowrap text-gray-600">
             <Paperclip className="h-3.5 w-3.5" aria-hidden /> หลักฐาน
           </dt>
           <dd className="text-gray-900">แนบในคอลัมน์หลักฐานของรายการ</dd>
@@ -399,20 +399,21 @@ export function SignForm({
 
   const locked = saving || !!pending;
   return (
-    <form onSubmit={submit} className="rounded-xl bg-white shadow-card ring-1 ring-gray-200/80">
-      <header className="flex items-center gap-3 border-b border-gray-100 px-5 py-4">
-        <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-brand-50 text-brand-600">
+    <form onSubmit={submit} className="min-w-0 rounded-xl bg-white shadow-card ring-1 ring-gray-300/80">
+      <header className="flex items-center gap-3 border-b border-gray-200 px-4 py-4 sm:px-5">
+        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-brand-50 text-brand-600 ring-1 ring-brand-100 ring-inset">
           <PenLine className="h-[18px] w-[18px]" aria-hidden />
         </span>
-        <div>
+        <div className="min-w-0">
           <h2 className="text-[15px] font-semibold text-gray-900">ยืนยันผลรับ–ส่ง</h2>
-          <p className="text-[12.5px] text-gray-500">เลือกผลตามจริง แล้วให้ผู้เกี่ยวข้องเซ็น</p>
+          <p className="text-[13px] text-gray-600">เลือกผลตามจริง แล้วให้ผู้เกี่ยวข้องเซ็น</p>
         </div>
       </header>
-      <fieldset disabled={locked} className="space-y-5 p-5">
+      <fieldset disabled={locked} className="min-w-0 space-y-5 p-4 sm:p-5">
         <div>
-          <legend className="mb-2 text-[13px] font-medium text-gray-700">ผลรับ–ส่งเอกสาร</legend>
-          <div className="grid gap-2 sm:grid-cols-3" role="radiogroup">
+          <legend className="mb-2 text-[13px] font-medium text-gray-800">ผลรับ–ส่งเอกสาร</legend>
+          {/* Stacked until the form column is wide enough for three labels on one line each. */}
+          <div className="grid gap-2 2xl:grid-cols-3" role="radiogroup">
             {OUTCOMES.map((o) => {
               const Icon = OUTCOME_ICON[o.value];
               const on = outcome === o.value;
@@ -420,8 +421,8 @@ export function SignForm({
               return (
                 <label
                   key={o.value}
-                  className={`flex cursor-pointer items-center gap-2.5 rounded-lg px-3 py-2.5 text-[13px] ring-1 transition ring-inset ${
-                    on ? 'bg-brand-50/70 font-medium text-gray-900 ring-2 ring-brand-500' : 'text-gray-700 ring-gray-200 hover:bg-gray-50'
+                  className={`flex min-h-11 cursor-pointer items-center gap-2.5 rounded-lg px-3 py-2.5 text-[13px] ring-1 transition ring-inset has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-brand-600 ${
+                    on ? 'bg-brand-50 font-medium text-gray-900 ring-2 ring-brand-500' : 'bg-white text-gray-800 ring-gray-300 hover:bg-gray-50 hover:ring-gray-400'
                   }`}
                 >
                   <input
@@ -444,11 +445,12 @@ export function SignForm({
           </div>
         </div>
         <label className="block">
-          <span className="mb-1.5 block text-[13px] font-medium text-gray-700">
-            ชื่อ–นามสกุลผู้เซ็น <span className="text-rose-500">*</span>
+          <span className="mb-1.5 block text-[13px] font-medium text-gray-800">
+            ชื่อ–นามสกุลผู้เซ็น <span className="text-rose-600">*</span>
           </span>
           <input
-            className={`${inputClass} h-11 text-base sm:h-10 sm:text-sm`}
+            // max-sm:text-base: iOS Safari zooms the page into any input under 16px.
+            className={`${inputClass} h-11 max-sm:text-base sm:h-10`}
             maxLength={120}
             required
             autoComplete="off"
@@ -462,14 +464,14 @@ export function SignForm({
         </label>
         <div>
           <div className="mb-1.5 flex items-center justify-between">
-            <span className="text-[13px] font-medium text-gray-700">
-              ลายเซ็น <span className="text-rose-500">*</span>
+            <span className="text-[13px] font-medium text-gray-800">
+              ลายเซ็น <span className="text-rose-600">*</span>
             </span>
             <Button variant="ghost" size="sm" onClick={clearPad} disabled={!signed || locked}>
               <RotateCcw className="h-3.5 w-3.5" aria-hidden /> เซ็นใหม่
             </Button>
           </div>
-          <div className={`relative overflow-hidden rounded-xl border bg-white transition ${inking ? 'border-brand-500 ring-2 ring-brand-500/30' : 'border-gray-300'}`}>
+          <div className={`relative overflow-hidden rounded-xl border-2 bg-white transition ${inking ? 'border-brand-500 ring-2 ring-brand-500/30' : signed ? 'border-gray-400' : 'border-dashed border-gray-400'}`}>
             <canvas
               ref={canvas}
               width={1000}
@@ -483,19 +485,19 @@ export function SignForm({
               onPointerCancel={end}
             />
             {!signed && (
-              <div className={`pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-1 text-gray-400 transition-opacity ${inking ? 'opacity-0' : ''}`}>
+              <div className={`pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-1 pb-[12%] text-gray-500 transition-opacity ${inking ? 'opacity-0' : ''}`}>
                 <Signature className="h-7 w-7" aria-hidden />
                 <span className="text-sm font-medium">เซ็นชื่อที่นี่</span>
-                <span className="text-[11.5px]">ใช้นิ้ว ปากกา หรือเมาส์</span>
+                <span className="text-[12px]">ใช้นิ้ว ปากกา หรือเมาส์</span>
               </div>
             )}
-            <div className="pointer-events-none absolute inset-x-8 bottom-[22%] border-b border-dashed border-gray-300" />
+            <div className="pointer-events-none absolute inset-x-8 bottom-[22%] border-b border-dashed border-gray-400" />
           </div>
         </div>
       </fieldset>
-      <div className="space-y-3 border-t border-gray-100 px-5 py-4">
-        <p className="flex items-center gap-2 text-[12.5px] text-gray-500">
-          <ShieldCheck className="h-4 w-4 text-emerald-600" aria-hidden /> แนบหลักฐานลายเซ็นก่อน แล้วจึงเปลี่ยนสถานะใน monday
+      <div className="space-y-3 border-t border-gray-200 px-4 py-4 sm:px-5">
+        <p className="flex items-start gap-2 text-[13px] text-gray-600">
+          <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" aria-hidden /> แนบหลักฐานลายเซ็นก่อน แล้วจึงเปลี่ยนสถานะใน monday
         </p>
         {error && <Alert tone="error">{error.message}{!error.stale && ' · ข้อมูลยังอยู่ในหน้านี้'}</Alert>}
         {storageError && <Alert tone="warning">เก็บฉบับร่างในเครื่องไม่ได้ กรุณาเปิดหน้านี้ไว้จนกว่าจะบันทึกสำเร็จ</Alert>}

@@ -12,20 +12,20 @@ import { type HandoffDetail, publicApi, type SaveResult } from '@/lib/handoffs';
 
 export default function SignPage() {
   return (
-    <div className="min-h-screen bg-gray-50">
-      <header className="sticky top-0 z-10 border-b border-gray-200/80 bg-white/90 backdrop-blur">
+    <div className="min-h-screen bg-canvas">
+      <header className="sticky top-0 z-10 border-b border-gray-300 bg-white/95 backdrop-blur">
         <div className="mx-auto flex max-w-5xl items-center gap-3 px-4 py-2.5">
-          <PasLogo className="h-8 w-auto" priority />
-          <div className="leading-tight">
+          <PasLogo className="h-8 w-auto shrink-0" priority />
+          <div className="min-w-0 leading-tight">
             <p className="text-[13px] font-semibold text-gray-900">รับ–ส่งเอกสาร</p>
-            <p className="text-[11px] text-gray-500">PAS Accounting</p>
+            <p className="text-[12px] text-gray-600">PAS Accounting</p>
           </div>
-          <span className="ml-auto inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-700">
+          <span className="ml-auto inline-flex shrink-0 items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[12px] font-medium text-emerald-800 ring-1 ring-emerald-200 ring-inset">
             <ShieldCheck className="h-3.5 w-3.5" aria-hidden /> ลิงก์เฉพาะรายการ
           </span>
         </div>
       </header>
-      <main className="mx-auto max-w-5xl px-4 py-5">
+      <main className="mx-auto max-w-5xl px-3 py-5 sm:px-4">
         <Suspense fallback={<Loading rows={6} />}>
           <Sign />
         </Suspense>
@@ -66,12 +66,13 @@ function Sign() {
       <div>
         <h1 className="text-xl font-semibold tracking-tight text-gray-900">บันทึกผลรับ–ส่งเอกสาร</h1>
         {until && (
-          <p className="mt-1 flex items-center gap-1 text-[12.5px] text-gray-500">
+          <p className="mt-1 flex items-center gap-1 text-[13px] text-gray-600">
             <Clock3 className="h-3.5 w-3.5" aria-hidden /> ลิงก์ใช้ได้ถึง {until} น.
           </p>
         )}
       </div>
-      <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">
+      {/* grid-cols-1 = minmax(0,1fr): long monday text wraps instead of widening the signer's phone screen. */}
+      <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">
         <ItemDetails item={d.item} />
         <SignForm
           key={detail.dataUpdatedAt}
@@ -79,7 +80,7 @@ function Sign() {
           context={d.context}
           save={(body) => publicApi<SaveResult>('/handoffs', { method: 'POST', body })}
           onReopen={() => void detail.refetch()}
-          done={<p className="text-[13px] text-gray-500">ขอบคุณครับ/ค่ะ ปิดหน้านี้ได้เลย</p>}
+          done={<p className="text-[13px] text-gray-600">ขอบคุณครับ/ค่ะ ปิดหน้านี้ได้เลย</p>}
         />
       </div>
     </div>
@@ -89,7 +90,7 @@ function Sign() {
 function Invalid({ message }: { message: string }) {
   return (
     <div className="mx-auto max-w-md space-y-3 py-16 text-center">
-      <span className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-gray-100 text-gray-400">
+      <span className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-white text-gray-500 ring-1 ring-gray-300">
         <LinkIcon className="h-6 w-6" aria-hidden />
       </span>
       <Alert tone="warning">{message}</Alert>

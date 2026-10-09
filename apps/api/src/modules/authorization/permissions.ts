@@ -22,6 +22,7 @@ export const PERMISSIONS = [
   'room.manage', //          meeting rooms and any booking
   'cost.read', //            money in reports (rates × hours), within the report scope
   'cost.write', //           cost rates per level
+  'revenue.write', //        import revenue (Excel / source system), match it to customers, void a batch
   'audit.read',
 ] as const;
 
@@ -47,6 +48,7 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   'room.manage': 'จัดการห้องประชุมและการจองทั้งหมด',
   'cost.read': 'ดูต้นทุน (อัตรา × ชั่วโมง) ในรายงาน',
   'cost.write': 'กำหนดอัตราต้นทุนตามระดับ',
+  'revenue.write': 'นำเข้ารายได้และจับคู่กับลูกค้า',
   'audit.read': 'ดูประวัติการใช้งาน (Audit)',
 };
 

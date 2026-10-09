@@ -37,6 +37,10 @@ import { ReportsController } from './modules/reports/reports.controller';
 import { ReportsService } from './modules/reports/reports.service';
 import { CostRatesController } from './modules/reports/cost.controller';
 import { CostService } from './modules/reports/cost.service';
+import { RevenueController } from './modules/revenue/revenue.controller';
+import { RevenueService } from './modules/revenue/revenue.service';
+import { TrcloudClient } from './modules/revenue/trcloud.client';
+import { TrcloudSync } from './modules/revenue/trcloud.sync';
 import { TimeReportController } from './modules/time-report/time-report.controller';
 import { TimeReportService } from './modules/time-report/time-report.service';
 import { HandoffsController, PublicHandoffsController } from './modules/handoffs/handoffs.controller';
@@ -92,6 +96,7 @@ class SharedModule {}
     AnnouncementsController,
     MeetingsController,
     ReportsController,
+    RevenueController,
     CostRatesController,
     AssetsController,
     LicensesController,
@@ -107,6 +112,9 @@ class SharedModule {}
     HandoffsService,
     ReportsService,
     CostService,
+    RevenueService,
+    TrcloudClient,
+    TrcloudSync,
     HomeService,
     MeetingsService,
     StorageService,

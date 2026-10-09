@@ -1,6 +1,7 @@
 /** รับ–ส่งเอกสาร (ex-DELIPAS): tickets live on the monday board; the API lists them and writes the outcome back. */
 
 import { ApiError } from './api';
+import { thaiDate } from './format';
 
 export interface HandoffDocument {
   title: string;
@@ -66,6 +67,11 @@ export const OUTCOMES = [
   { value: '2', label: 'ไม่ได้รับ / ไม่ได้ส่งมอบ', full: 'ไม่ได้รับเอกสาร/ไม่ได้ส่งมอบเอกสาร' },
 ] as const;
 export type Outcome = (typeof OUTCOMES)[number]['value'];
+
+/** monday dates arrive as "2026-09-11"; show them like the rest of the portal ("11 กันยายน 2569"). */
+export function handoffDate(date: string): string {
+  return /^\d{4}-\d{2}-\d{2}$/.test(date) ? thaiDate(date) : date;
+}
 
 export function statusTone(status: string): 'done' | 'issue' | 'open' {
   if (status.includes('ครบถ้วน/')) return 'done';

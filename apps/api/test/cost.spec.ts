@@ -135,3 +135,35 @@ describe('customer cost report', () => {
     await employee.agent.get(url).expect(403);
   });
 });
+
+describe('interactive report rows (/reports/analytics)', () => {
+  type Analytics = {
+    priced: boolean;
+    customers: { code: string }[];
+    activities: { type: string }[];
+    employees: { id: string }[];
+    rows: [string, number, number, number, string, number, number | null][];
+  };
+  const mine = (a: Analytics) => a.rows.filter((r) => a.employees[r[3]].id === personId);
+  const url = '/api/reports/analytics?from=2026-01-01&to=2026-12-31&basis=AT_DATE';
+
+  it('one row per entry, priced exactly like the customer detail (unpriced stays null, never 0)', async () => {
+    const a: Analytics = (await admin.agent.get(url).expect(200)).body;
+    expect(a.priced).toBe(true);
+    expect(mine(a).map((r) => [r[0], a.customers[r[1]].code, r[4], r[5], r[6]])).toEqual([
+      ['2026-03-02', customerCode, 'J', 480, 888.89],
+      ['2026-07-01', customerCode, 'S', 540, null], // S rate removed above
+      ['2026-07-02', 'PAS', 'S', 540, null], //       leave: same row shape, told apart by activity type
+    ]);
+    expect(a.activities[mine(a)[2][2]].type).toBe('LEAVE');
+  });
+
+  it('hours for report readers without cost.read; employees are refused; scope still applies', async () => {
+    const p: Analytics = (await partner.agent.get(url).expect(200)).body;
+    expect(p.priced).toBe(false);
+    expect(p.rows.length).toBeGreaterThan(0);
+    expect(p.rows.every((r) => r[6] === null)).toBe(true);
+    expect(mine((await manager.agent.get(url).expect(200)).body)).toHaveLength(3); // same team
+    await employee.agent.get(url).expect(403);
+  });
+});

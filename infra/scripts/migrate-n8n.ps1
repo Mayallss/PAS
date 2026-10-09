@@ -73,6 +73,9 @@ if (-not $key) {
   if ($cfg) { $key = ($cfg | ConvertFrom-Json).encryptionKey }
 }
 if (-not $key) { throw 'หา encryption key ของ n8n บนเครื่องไม่เจอ (ทั้งใน env และ /home/node/.n8n/config)' }
+$sha = [Security.Cryptography.SHA256]::Create()
+$keyPrint = (-join ($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($key)) | ForEach-Object { $_.ToString('x2') })).Substring(0, 12)
+Write-Host "   key fingerprint บนเครื่อง: $keyPrint (ต้องตรงกับ 'key fingerprint on AWS' ใน log ขั้นที่ 6)"
 
 Write-Warning "ข้อมูลทั้งหมดใน n8n บน AWS จะถูกแทนที่ด้วย n8n บนเครื่องนี้ และ n8n บน AWS จะหยุดประมาณ 5 นาที"
 if (-not $Yes) {
@@ -86,7 +89,12 @@ try {
   # ---------- 2) export ----------
   Write-Host '2) export จาก n8n บนเครื่อง' -ForegroundColor Cyan
   Try-Native { docker exec $Container rm -rf /tmp/n8n-export } | Out-Null
-  Native docker @('exec', $Container, 'n8n', 'export:entities', '--outputDir=/tmp/n8n-export')
+  # Encrypt the export with the local key explicitly (same key is used for the import on AWS).
+  Native docker @('exec', '-e', "MIGKEY=$key", $Container, 'sh', '-c', 'umask 077; printf %s "$MIGKEY" > /tmp/n8n-key')
+  try {
+    Native docker @('exec', $Container, 'n8n', 'export:entities', '--outputDir=/tmp/n8n-export', '--keyFile=/tmp/n8n-key')
+  }
+  finally { Try-Native { docker exec $Container rm -f /tmp/n8n-key } | Out-Null }
   Native docker @('cp', "${Container}:/tmp/n8n-export", $work)
   Try-Native { docker exec $Container rm -rf /tmp/n8n-export } | Out-Null
   $root = Join-Path $work 'n8n-export'
@@ -125,7 +133,55 @@ try {
   Native aws @('ecs', 'wait', 'services-stable', '--region', $region, '--cluster', $cluster, '--services', $service)
 
   # ---------- 6) import inside the VPC ----------
-  Write-Host '6) import ลงฐานข้อมูล n8n บน AWS (2–5 นาที)' -ForegroundColor Cyan
+  # RDS gives nobody superuser, so n8n cannot switch off foreign keys while importing (session_replication_role).
+  # Instead the n8n role (owner of every table) drops its foreign keys first, keeps their definitions in
+  # public._mig_fk, and adds them back after the import — the same effect, no superuser needed.
+  Write-Host '6) import ลงฐานข้อมูล n8n บน AWS (3–6 นาที)' -ForegroundColor Cyan
+  $connSh = @'
+U="${ADMIN_URL%%\?*}"; HP="${U##*@}"; HP="${HP%%/*}"
+export PGSSLMODE="${PGSSLMODE:-require}" PGHOST="${HP%%:*}" PGPORT="${HP##*:}" PGUSER=n8n PGPASSWORD="$N8N_DB_PASSWORD" PGDATABASE=n8n
+'@
+  $prepSh = @'
+set -e
+psql -v ON_ERROR_STOP=1 -q -c "DO \$\$ BEGIN IF to_regclass('public._mig_fk') IS NULL THEN CREATE TABLE public._mig_fk AS SELECT conrelid::regclass::text AS tbl, conname::text AS conname, pg_get_constraintdef(oid) AS def FROM pg_constraint WHERE contype = 'f' AND connamespace = 'public'::regnamespace; END IF; END \$\$;"
+psql -v ON_ERROR_STOP=1 -qAt -c "SELECT format('ALTER TABLE %s DROP CONSTRAINT IF EXISTS %I;', tbl, conname) FROM public._mig_fk" > /tmp/drop.sql
+psql -v ON_ERROR_STOP=1 -q -f /tmp/drop.sql
+echo "FK_DROPPED $(psql -tAc 'SELECT count(*) FROM public._mig_fk')"
+'@
+  $restoreSh = @'
+set -e
+if [ "$(psql -tAc "SELECT to_regclass('public._mig_fk') IS NOT NULL")" = "t" ]; then
+  psql -v ON_ERROR_STOP=1 -qAt -c "SELECT format('ALTER TABLE %s ADD CONSTRAINT %I %s;', f.tbl, f.conname, f.def) FROM public._mig_fk f WHERE NOT EXISTS (SELECT 1 FROM pg_constraint c WHERE c.conname = f.conname AND c.conrelid = f.tbl::regclass)" > /tmp/add.sql
+  psql -v ON_ERROR_STOP=1 -q -1 -f /tmp/add.sql
+  psql -v ON_ERROR_STOP=1 -q -c 'DROP TABLE public._mig_fk'
+fi
+echo "FK_RESTORED $(psql -tAc "SELECT count(*) FROM pg_constraint WHERE contype = 'f' AND connamespace = 'public'::regnamespace")"
+'@
+  function Invoke-ToolTask([string]$label, [string]$dbinitCmd, [string]$toolCmd, [object[]]$toolEnv) {
+    $ov = @{ containerOverrides = @(
+        @{ name = 'dbinit'; command = @('sh', '-c', ($dbinitCmd -replace "`r", '')) },  # postgres image: no sh -c entrypoint
+        @{ name = 'n8n-tool'; command = @(($toolCmd -replace "`r", '')); environment = $toolEnv }
+      ) }
+    $f = Join-Path $work "overrides-$label.json"
+    WriteUtf8 $f ($ov | ConvertTo-Json -Depth 6 -Compress)
+    $arn = aws ecs run-task --region $region --cluster $cluster --task-definition $tool `
+      --capacity-provider-strategy capacityProvider=FARGATE,weight=1 `
+      --network-configuration "awsvpcConfiguration={subnets=[$subnets],securityGroups=[$sg],assignPublicIp=ENABLED}" `
+      --overrides ('file://' + ($f -replace '\\', '/')) --query 'tasks[0].taskArn' --output text --no-cli-pager
+    if ($LASTEXITCODE -ne 0 -or -not $arn -or $arn -eq 'None') { throw "run-task ($label) failed" }
+    aws ecs wait tasks-stopped --region $region --cluster $cluster --tasks $arn | Out-Null
+    $id = $arn.Split('/')[-1]
+    $codes = aws ecs describe-tasks --region $region --cluster $cluster --tasks $arn --query "tasks[0].containers[].[name,exitCode]" --output text --no-cli-pager
+    foreach ($c in @('dbinit', 'n8n-tool')) {
+      $stream = if ($c -eq 'dbinit') { "dbinit/dbinit/$id" } else { "tool/n8n-tool/$id" }
+      Write-Host "--- $label / $c ---" -ForegroundColor DarkGray
+      Try-Native { aws logs get-log-events --region $region --log-group-name "/ecs/$cluster/n8n" --log-stream-name $stream --query 'events[].message' --output text --no-cli-pager } | Out-Host
+    }
+    $ok = $true
+    foreach ($line in @($codes)) { $p = "$line" -split '\s+'; if ($p.Count -ge 2 -and $p[1] -ne '0') { $ok = $false } }
+    return $ok
+  }
+
   $fetchJs = @'
 const fs = require('fs'), path = require('path');
 (async () => {
@@ -142,31 +198,20 @@ const fs = require('fs'), path = require('path');
   console.log('files written: ' + Object.keys(bundle).length);
 })().catch((e) => { console.error(e.message); process.exit(1); });
 '@
-  $cmd = 'set -e; node -e "$FETCH_JS"; n8n import:entities --inputDir=/tmp/n8n-import --truncateTables=true || { echo "--- import:entities --help ---"; n8n import:entities --help; exit 1; }; echo IMPORT_OK'
-  $overrides = @{ containerOverrides = @(@{
-        name        = 'n8n-tool'
-        command     = @($cmd)
-        environment = @(
-          @{ name = 'BUNDLE_URL'; value = "$url" },
-          @{ name = 'FETCH_JS'; value = ($fetchJs -replace "`r", '') }
-        )
-      }) }
-  $tmp = Join-Path $work 'overrides.json'
-  WriteUtf8 $tmp ($overrides | ConvertTo-Json -Depth 6 -Compress)
-  $taskArn = aws ecs run-task --region $region --cluster $cluster --task-definition $tool `
-    --capacity-provider-strategy capacityProvider=FARGATE,weight=1 `
-    --network-configuration "awsvpcConfiguration={subnets=[$subnets],securityGroups=[$sg],assignPublicIp=ENABLED}" `
-    --overrides ('file://' + ($tmp -replace '\\', '/')) --query 'tasks[0].taskArn' --output text --no-cli-pager
-  if ($LASTEXITCODE -ne 0 -or -not $taskArn -or $taskArn -eq 'None') { throw 'run-task failed' }
-  aws ecs wait tasks-stopped --region $region --cluster $cluster --tasks $taskArn
-  $exit = aws ecs describe-tasks --region $region --cluster $cluster --tasks $taskArn --query "tasks[0].containers[?name=='n8n-tool'].exitCode | [0]" --output text --no-cli-pager
-  $taskId = $taskArn.Split('/')[-1]
-  Write-Host "--- log (/ecs/$cluster/n8n, tool/n8n-tool/$taskId) ---" -ForegroundColor DarkGray
-  aws logs get-log-events --region $region --log-group-name "/ecs/$cluster/n8n" --log-stream-name "tool/n8n-tool/$taskId" --query 'events[].message' --output text --no-cli-pager
-
+  $importCmd = 'set -e; node -e "$FETCH_JS"; umask 077; printf %s "$N8N_ENCRYPTION_KEY" > /tmp/n8n-key; echo "key fingerprint on AWS: $(node -e "$PRINT_JS")"; n8n import:entities --inputDir=/tmp/n8n-import --truncateTables=true --keyFile=/tmp/n8n-key --skipTogglingForeignKeyConstraints; echo IMPORT_OK'
+  $importEnv = @(
+    @{ name = 'BUNDLE_URL'; value = "$url" },
+    @{ name = 'FETCH_JS'; value = ($fetchJs -replace "`r", '') },
+    @{ name = 'PRINT_JS'; value = 'process.stdout.write(require("crypto").createHash("sha256").update(process.env.N8N_ENCRYPTION_KEY || "").digest("hex").slice(0, 12))' }
+  )
+  $imported = Invoke-ToolTask 'import' ($connSh + "`n" + $prepSh) $importCmd $importEnv
   aws s3 rm "s3://$bucket/$s3key" --region $region --only-show-errors --no-cli-pager | Out-Null
-  if ($exit -ne '0') {
-    Write-Warning "import ไม่สำเร็จ (exit $exit) — n8n บน AWS ยังหยุดอยู่ ส่ง log ด้านบนให้ผู้ดูแล"
+
+  Write-Host '   คืนค่า foreign keys' -ForegroundColor Cyan
+  $restored = Invoke-ToolTask 'restore-fk' ($connSh + "`n" + $restoreSh) 'echo done' @()
+
+  if (-not $imported -or -not $restored) {
+    Write-Warning "ไม่สำเร็จ (import=$imported, foreign keys=$restored) — n8n บน AWS ยังหยุดอยู่ ส่ง log ด้านบนให้ผู้ดูแล"
     Write-Warning "เปิด n8n กลับ: aws ecs update-service --cluster $cluster --service $service --desired-count 1 --region $region --no-cli-pager"
     return
   }

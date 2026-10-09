@@ -46,6 +46,17 @@ const schema = z.object({
     .transform((v) => v.split(',').map((x) => Number(x.trim())).filter((n) => Number.isInteger(n) && n >= 0 && n <= 40320)),
   /** How often the sync worker runs; 0 = never (tests run it explicitly). */
   CALENDAR_SYNC_INTERVAL_MS: z.coerce.number().min(0).default(60_000),
+  /**
+   * TRCLOUD (accounting) — contacts and sales invoices are pulled from here (revenue). All four values come from
+   * TRCLOUD → RESTFUL API → Setting → API Key. Empty = not connected; Excel import still works.
+   */
+  TRCLOUD_BASE_URL: z.string().optional().default(''),
+  TRCLOUD_COMPANY_ID: z.string().optional().default(''),
+  TRCLOUD_PASSKEY: z.string().optional().default(''),
+  /** Second secret: only used to compute securekey = md5(encryptHead + "t" + timestamp); never sent. */
+  TRCLOUD_ENCRYPT_HEAD: z.string().optional().default(''),
+  /** Sent as the Origin header; must equal the API key's Origin in TRCLOUD (or the key is set to ANY). */
+  TRCLOUD_ORIGIN: z.string().optional().default(''),
   /** Username + password sign-in (user decision 2026-10-02): on by default so the portal works without Google. "false" turns it off. */
   PASSWORD_LOGIN: z
     .string()
@@ -59,7 +70,7 @@ const schema = z.object({
 
 /** A problem with an optional integration's settings: that integration is switched off, everything else runs. */
 export interface IntegrationIssue {
-  integration: 'google_login' | 'google_calendar' | 'monday';
+  integration: 'google_login' | 'google_calendar' | 'monday' | 'trcloud';
   setting: string;
   message: string;
 }
@@ -68,6 +79,7 @@ export type AppConfig = z.infer<typeof schema> & {
   oidcEnabled: boolean;
   secureCookies: boolean;
   googleCalendarEnabled: boolean;
+  trcloudEnabled: boolean;
   integrationIssues: IntegrationIssue[];
 };
 
@@ -92,6 +104,11 @@ const INTEGRATION_SETTINGS: Record<string, IntegrationIssue['integration']> = {
   GOOGLE_COMPANY_CALENDAR_ID: 'google_calendar',
   GOOGLE_REMINDER_MINUTES: 'google_calendar',
   CALENDAR_SYNC_INTERVAL_MS: 'google_calendar',
+  TRCLOUD_BASE_URL: 'trcloud',
+  TRCLOUD_COMPANY_ID: 'trcloud',
+  TRCLOUD_PASSKEY: 'trcloud',
+  TRCLOUD_ENCRYPT_HEAD: 'trcloud',
+  TRCLOUD_ORIGIN: 'trcloud',
 };
 
 let cached: AppConfig | undefined;
@@ -138,7 +155,17 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     }
   }
 
-  cached = { ...parsed, oidcEnabled, secureCookies: parsed.APP_ORIGIN.startsWith('https://'), googleCalendarEnabled, integrationIssues: issues };
+  const trcloudSet = [parsed.TRCLOUD_BASE_URL, parsed.TRCLOUD_COMPANY_ID, parsed.TRCLOUD_PASSKEY, parsed.TRCLOUD_ENCRYPT_HEAD, parsed.TRCLOUD_ORIGIN];
+  let trcloudEnabled = trcloudSet.every(Boolean) && !off('trcloud');
+  if (trcloudSet.some(Boolean) && !trcloudSet.every(Boolean)) {
+    issues.push({ integration: 'trcloud', setting: 'TRCLOUD_*', message: 'ตั้งค่าไม่ครบ 5 ค่า (BASE_URL, COMPANY_ID, PASSKEY, ENCRYPT_HEAD, ORIGIN) — ปิดการเชื่อมต่อ TRCLOUD ไว้' });
+  }
+  if (trcloudEnabled && !/^https:\/\/[^/\s]+\/?$/.test(parsed.TRCLOUD_BASE_URL)) {
+    issues.push({ integration: 'trcloud', setting: 'TRCLOUD_BASE_URL', message: 'ต้องเป็น https://<โดเมน> เท่านั้น (ไม่ต้องมี path)' });
+    trcloudEnabled = false;
+  }
+
+  cached = { ...parsed, oidcEnabled, secureCookies: parsed.APP_ORIGIN.startsWith('https://'), googleCalendarEnabled, trcloudEnabled, integrationIssues: issues };
   for (const i of issues) console.warn(`[config] ${i.integration}: ${i.setting} — ${i.message}`);
   return cached;
 }

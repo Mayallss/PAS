@@ -54,6 +54,12 @@ export class IntegrationsController {
         state: stateOf('monday', Boolean(c.MONDAY_API_TOKEN && c.HANDOFF_LINK_SECRET.length >= 32)),
         whenOff: 'เมนูรับ–ส่งเอกสารใช้ไม่ได้ ส่วนอื่นใช้งานได้ตามปกติ',
       },
+      {
+        key: 'trcloud',
+        name: 'TRCLOUD (คู่ค้าและใบแจ้งหนี้ → รายได้)',
+        state: stateOf('trcloud', c.trcloudEnabled),
+        whenOff: 'ยังดึงรายได้และข้อมูลคู่ค้าจาก TRCLOUD ไม่ได้ — นำเข้ารายได้จาก Excel ได้ตามปกติ',
+      },
     ];
     return {
       items: items.map((i) => ({

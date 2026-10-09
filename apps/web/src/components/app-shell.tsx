@@ -52,18 +52,18 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const nav = <SidebarNav pathname={pathname} onOpenPalette={() => setPaletteOpen(true)} />;
 
   const userCard = (
-    <div className="flex items-center gap-2.5 border-t border-gray-200 px-3 py-3">
+    <div className="flex items-center gap-2.5 border-t border-gray-300 px-3 py-3">
       <div className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-brand-100 text-xs font-semibold text-brand-800" aria-hidden>
         {initials(me.user.fullName)}
       </div>
       <div className="min-w-0 flex-1">
         <p className="truncate text-[13px] font-medium text-gray-900">{me.user.fullName}</p>
-        <p className="truncate text-[11px] text-gray-500">{roles.length ? roles.join(' · ') : 'พนักงาน'}</p>
+        <p className="truncate text-[12px] text-gray-600">{roles.length ? roles.join(' · ') : 'พนักงาน'}</p>
       </div>
-      <Link href="/account" title="บัญชีและรหัสผ่าน" aria-label="บัญชีและรหัสผ่าน" className="rounded-md p-1.5 text-gray-400 hover:bg-gray-200/60 hover:text-gray-700">
+      <Link href="/account" title="บัญชีและรหัสผ่าน" aria-label="บัญชีและรหัสผ่าน" className="rounded-md p-1.5 text-gray-600 hover:bg-gray-300/50 hover:text-gray-900">
         <KeyRound className="h-4 w-4" />
       </Link>
-      <button type="button" onClick={logout} title="ออกจากระบบ" aria-label="ออกจากระบบ" className="rounded-md p-1.5 text-gray-400 hover:bg-gray-200/60 hover:text-gray-700">
+      <button type="button" onClick={logout} title="ออกจากระบบ" aria-label="ออกจากระบบ" className="rounded-md p-1.5 text-gray-600 hover:bg-gray-300/50 hover:text-gray-900">
         <LogOut className="h-4 w-4" />
       </button>
     </div>
@@ -86,7 +86,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         ข้ามไปเนื้อหา
       </a>
 
-      <aside className="fixed inset-y-0 left-0 z-30 hidden w-60 flex-col border-r border-gray-200 bg-gray-100/70 backdrop-blur lg:flex print:hidden">
+      <aside className="fixed inset-y-0 left-0 z-30 hidden w-60 flex-col border-r border-gray-300 bg-sidebar lg:flex print:hidden">
         <div className="flex items-center justify-between pr-3">
           {brand}
           <Optional name="bell">
@@ -97,7 +97,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         {userCard}
       </aside>
 
-      <header className="sticky top-0 z-30 flex h-14 items-center gap-2 border-b border-gray-200 bg-white/80 px-4 backdrop-blur lg:hidden print:hidden">
+      <header className="sticky top-0 z-30 flex h-14 items-center gap-2 border-b border-gray-300 bg-white/95 px-4 backdrop-blur lg:hidden print:hidden">
         <button type="button" onClick={() => setMobileOpen(true)} aria-label="เปิดเมนู" className="-ml-1.5 rounded-md p-1.5 text-gray-600 hover:bg-gray-100">
           <Menu className="h-5 w-5" />
         </button>
@@ -117,7 +117,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       {mobileOpen && (
         <div className="fixed inset-0 z-40 lg:hidden" role="dialog" aria-modal="true" aria-label="เมนู">
           <div className="absolute inset-0 bg-gray-950/30" onClick={() => setMobileOpen(false)} />
-          <div className="absolute inset-y-0 left-0 flex w-72 flex-col bg-gray-50 shadow-pop">
+          <div className="absolute inset-y-0 left-0 flex w-72 flex-col bg-sidebar shadow-pop">
             <div className="flex items-center justify-between pr-3">
               {brand}
               <button type="button" onClick={() => setMobileOpen(false)} aria-label="ปิดเมนู" className="rounded-md p-1.5 text-gray-500 hover:bg-gray-200">

@@ -4,7 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import { api } from './api';
 
 /** Optional integrations (API /integrations). The core works without them; pages use this to explain what is missing. */
-export type IntegrationKey = 'google_login' | 'google_calendar' | 'monday';
+export type IntegrationKey = 'google_login' | 'google_calendar' | 'monday' | 'trcloud';
 export interface Integration {
   key: IntegrationKey;
   name: string;

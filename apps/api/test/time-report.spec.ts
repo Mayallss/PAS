@@ -615,8 +615,8 @@ describe('meeting minutes: objections, revisions, highlights and re-certificatio
 
 describe('schema guard', () => {
   it('keeps the hand-written unique indexes (prisma migrate diff tries to drop them)', async () => {
-    const rows = await prisma.$queryRaw<{ indexname: string }[]>`SELECT indexname FROM pg_indexes WHERE indexname IN ('time_entry_employee_engagement_date_live_key','engagement_customer_category_period_key','role_assignment_unique_scope')`;
-    expect(rows.map((r) => r.indexname).sort()).toEqual(['engagement_customer_category_period_key', 'role_assignment_unique_scope', 'time_entry_employee_engagement_date_live_key']);
+    const rows = await prisma.$queryRaw<{ indexname: string }[]>`SELECT indexname FROM pg_indexes WHERE indexname IN ('time_entry_employee_engagement_date_live_key','engagement_customer_category_period_key','role_assignment_unique_scope','revenue_entry_batch_doc_key')`;
+    expect(rows.map((r) => r.indexname).sort()).toEqual(['engagement_customer_category_period_key', 'revenue_entry_batch_doc_key', 'role_assignment_unique_scope', 'time_entry_employee_engagement_date_live_key']);
   });
 });
 

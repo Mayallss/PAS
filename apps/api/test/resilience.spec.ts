@@ -33,7 +33,7 @@ it('one failing module leaves its part out of the bell and home page; the rest s
 it('reports integrations for everyone (what is missing while off); setting details only for admins', async () => {
   const forEmployee = await employee.agent.get('/api/integrations').expect(200);
   const keys = forEmployee.body.items.map((i: { key: string }) => i.key);
-  expect(keys).toEqual(['google_login', 'google_calendar', 'monday']);
+  expect(keys).toEqual(['google_login', 'google_calendar', 'monday', 'trcloud']);
   for (const i of forEmployee.body.items) {
     expect(['ON', 'OFF', 'ERROR']).toContain(i.state);
     expect(i.whenOff).toBeTruthy();

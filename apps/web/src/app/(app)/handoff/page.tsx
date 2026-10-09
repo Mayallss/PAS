@@ -7,10 +7,12 @@ import QRCode from 'qrcode';
 import { Suspense, useDeferredValue, useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import { ItemDetails, SignForm, StatusPill } from '@/components/handoff';
-import { Alert, Button, Dialog, Empty, Loading, PageHeader } from '@/components/ui';
+import { Alert, Button, Dialog, Empty, inputClass, Loading, PageHeader } from '@/components/ui';
 import { ApiError, api, errorMessage } from '@/lib/api';
 import { IntegrationHint } from '@/components/integration-hint';
-import type { HandoffDetail, HandoffItem, HandoffList, SaveResult } from '@/lib/handoffs';
+import { handoffDate, type HandoffDetail, type HandoffItem, type HandoffList, type SaveResult } from '@/lib/handoffs';
+
+const CONFIG_ERRORS = ['BOARD_CHANGED', 'NOT_CONFIGURED'];
 
 export default function HandoffPage() {
   return (
@@ -89,7 +91,7 @@ function List({ tab, onTab, onOpen }: { tab: string | null; onTab: (t: string) =
     const items = current?.items ?? [];
     const q = term.toLowerCase();
     if (!q) return items;
-    return items.filter((i) => [i.customer, i.id, i.date, i.name, i.type, i.period, i.status].join(' ').toLowerCase().includes(q));
+    return items.filter((i) => [i.customer, i.id, i.date, handoffDate(i.date), i.name, i.type, i.period, i.status].join(' ').toLowerCase().includes(q));
   }, [current, term]);
 
   return (
@@ -115,7 +117,8 @@ function List({ tab, onTab, onOpen }: { tab: string | null; onTab: (t: string) =
         groups.length > 0 && (
           <>
             <div className="mb-3 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-              <div className="-mx-1 flex gap-1 overflow-x-auto px-1 pb-1" role="tablist" aria-label="ตารางในบอร์ด">
+              {/* Wraps instead of scrolling sideways: every table stays visible on a phone. */}
+              <div className="flex flex-wrap gap-1.5" role="tablist" aria-label="ตารางในบอร์ด">
                 {groups.map((g) => {
                   const on = g.key === current?.key;
                   return (
@@ -125,42 +128,43 @@ function List({ tab, onTab, onOpen }: { tab: string | null; onTab: (t: string) =
                       role="tab"
                       aria-selected={on}
                       onClick={() => onTab(g.key)}
-                      className={`inline-flex shrink-0 items-center gap-1.5 rounded-lg px-3 py-1.5 text-[13px] font-medium whitespace-nowrap transition ${
-                        on ? 'bg-brand-600 text-white shadow-sm' : 'bg-white text-gray-600 ring-1 ring-gray-200 ring-inset hover:bg-gray-50'
+                      className={`inline-flex min-h-9 items-center gap-1.5 rounded-lg px-3 py-1.5 text-[13px] font-medium transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600 ${
+                        on ? 'bg-brand-600 text-white shadow-sm' : 'bg-white text-gray-700 ring-1 ring-gray-300 ring-inset hover:bg-gray-50 hover:ring-gray-400'
                       }`}
                     >
                       {g.title}
-                      <span className={`rounded-full px-1.5 text-[11px] tabular-nums ${on ? 'bg-white/20' : 'bg-gray-100 text-gray-500'}`}>{g.items.length}</span>
+                      <span className={`rounded-full px-1.5 text-[12px] tabular-nums ${on ? 'bg-white/20' : 'bg-gray-100 text-gray-700'}`}>{g.items.length}</span>
                     </button>
                   );
                 })}
               </div>
-              <div className="relative lg:w-80">
-                <Search className="pointer-events-none absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-gray-400" aria-hidden />
+              <div className="relative lg:w-80 lg:shrink-0">
+                <Search className="pointer-events-none absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-gray-500" aria-hidden />
                 <input
                   aria-label="ค้นหาในตารางที่เลือก"
                   placeholder="ค้นหาบริษัท เลขที่ วันที่ หรือสถานะ"
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
-                  className="block h-9 w-full rounded-lg border-0 bg-white pr-9 pl-9 text-sm shadow-card ring-1 ring-gray-200 ring-inset placeholder:text-gray-400 focus:ring-2 focus:ring-brand-600 focus:outline-none"
+                  className={`${inputClass} h-10 pr-10 pl-9 max-sm:text-base`}
                 />
                 {search && (
-                  <button type="button" onClick={() => setSearch('')} aria-label="ล้างคำค้นหา" className="absolute top-1/2 right-2 -translate-y-1/2 rounded p-1 text-gray-400 hover:bg-gray-100">
-                    <X className="h-3.5 w-3.5" />
+                  <button type="button" onClick={() => setSearch('')} aria-label="ล้างคำค้นหา" className="absolute top-1/2 right-1 grid h-8 w-8 -translate-y-1/2 place-items-center rounded-md text-gray-500 hover:bg-gray-100 hover:text-gray-700">
+                    <X className="h-4 w-4" />
                   </button>
                 )}
               </div>
             </div>
-            <p className="mb-2 text-[12px] text-gray-500">
-              <b className="font-medium text-gray-700">
+            <p className="mb-2 text-[12.5px] text-gray-600">
+              <b className="font-medium text-gray-800">
                 {visible.length} จาก {current?.items.length ?? 0} รายการ
               </b>
               {term && <> · ตรงกับ “{term}”</>} · สูงสุด 30 รายการล่าสุดต่อตาราง เรียงตามวันที่ดำเนินการ
             </p>
             {visible.length ? (
-              <ul className="grid gap-2 md:grid-cols-2">
+              // minmax(0,1fr) columns: a long one-line customer name truncates instead of widening the page.
+              <ul className="grid grid-cols-1 gap-2 md:grid-cols-2">
                 {visible.map((i, n) => (
-                  <li key={i.id} className="animate-fade-up" style={{ animationDelay: `${Math.min(n, 9) * 25}ms` }}>
+                  <li key={i.id} className="min-w-0 animate-fade-up" style={{ animationDelay: `${Math.min(n, 9) * 25}ms` }}>
                     <ItemCard item={i} term={term} onOpen={() => onOpen(i.id)} />
                   </li>
                 ))}
@@ -186,16 +190,16 @@ function ItemCard({ item: i, term, onOpen }: { item: HandoffItem; term: string; 
     <button
       type="button"
       onClick={onOpen}
-      className="group flex w-full items-center gap-3 rounded-xl bg-white p-3.5 text-left shadow-card ring-1 ring-gray-200/80 transition hover:-translate-y-px hover:ring-brand-300 focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:outline-none"
+      className="group flex w-full items-center gap-3 rounded-xl bg-white p-3.5 text-left shadow-card ring-1 ring-gray-300/80 transition hover:-translate-y-px hover:ring-brand-400 focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:outline-none"
     >
-      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-brand-50 text-brand-600">
+      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-brand-50 text-brand-600 ring-1 ring-brand-100 ring-inset">
         <FileText className="h-5 w-5" aria-hidden />
       </span>
       <span className="min-w-0 flex-1 space-y-0.5">
-        <span className="block truncate text-sm font-semibold text-gray-900">
+        <span className="line-clamp-2 text-sm font-semibold [overflow-wrap:anywhere] text-gray-900" title={i.customer}>
           <Mark text={i.customer} term={term} />
         </span>
-        <span className="flex flex-wrap items-center gap-x-2 text-[12px] text-gray-500">
+        <span className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[12.5px] text-gray-600">
           <span className="inline-flex items-center gap-0.5">
             <Hash className="h-3 w-3" aria-hidden />
             <Mark text={i.id} term={term} />
@@ -203,7 +207,7 @@ function ItemCard({ item: i, term, onOpen }: { item: HandoffItem; term: string; 
           <span>{i.type ? <Mark text={i.type} term={term} /> : 'ไม่ระบุประเภท'}</span>
           <span className="inline-flex items-center gap-1">
             <CalendarDays className="h-3 w-3" aria-hidden />
-            <Mark text={i.date} term={term} />
+            <Mark text={i.date ? handoffDate(i.date) : 'ไม่ระบุวันที่'} term={term} />
             {i.period && (
               <>
                 {' · '}
@@ -216,7 +220,7 @@ function ItemCard({ item: i, term, onOpen }: { item: HandoffItem; term: string; 
           <StatusPill status={i.status}>{i.status ? <Mark text={i.status} term={term} /> : undefined}</StatusPill>
         </span>
       </span>
-      <ArrowRight className="h-4 w-4 shrink-0 text-gray-300 transition group-hover:translate-x-0.5 group-hover:text-brand-500" aria-hidden />
+      <ArrowRight className="h-4 w-4 shrink-0 text-gray-400 transition group-hover:translate-x-0.5 group-hover:text-brand-500" aria-hidden />
     </button>
   );
 }
@@ -264,15 +268,19 @@ function Detail({ id, onBack }: { id: string; onBack: () => void }) {
       {detail.isError && (
         <div className="space-y-3">
           <Alert tone="error">{errorMessage(detail.error)}</Alert>
-          <Button onClick={() => void detail.refetch()}>
-            <RefreshCw className="h-4 w-4" aria-hidden /> ลองอีกครั้ง
-          </Button>
+          {/* A board/config mismatch is fixed by an admin, not by retrying. */}
+          {!(detail.error instanceof ApiError && CONFIG_ERRORS.includes(detail.error.code)) && (
+            <Button onClick={() => void detail.refetch()}>
+              <RefreshCw className="h-4 w-4" aria-hidden /> ลองอีกครั้ง
+            </Button>
+          )}
         </div>
       )}
       {detail.data && (
         <>
           <PageHeader title="บันทึกผลรับ–ส่งเอกสาร" description={<span className="tabular-nums">รายการ {detail.data.item.id}</span>} />
-          <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">
+          {/* grid-cols-1 = minmax(0,1fr): below lg the column never grows past the screen. */}
+          <div className="grid grid-cols-1 items-start gap-4 sm:gap-5 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">
             <ItemDetails item={detail.data.item} status={status} />
             <SignForm
               key={detail.dataUpdatedAt}
@@ -330,14 +338,14 @@ function ShareDialog({ open, onClose, url, expiresAt }: { open: boolean; onClose
         <div className="flex justify-center">
           {qr ? (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={qr} alt="QR ลิงก์สำหรับเซ็น" width={220} height={220} className="rounded-lg ring-1 ring-gray-200" />
+            <img src={qr} alt="QR ลิงก์สำหรับเซ็น" width={220} height={220} className="h-auto max-w-full rounded-lg ring-1 ring-gray-300" />
           ) : (
-            <div className="flex h-[220px] w-[220px] items-center justify-center rounded-lg bg-gray-50 text-gray-300">
+            <div className="flex aspect-square w-[220px] max-w-full items-center justify-center rounded-lg bg-gray-100 text-gray-400">
               <QrCode className="h-10 w-10" />
             </div>
           )}
         </div>
-        <p className="rounded-lg bg-gray-50 px-3 py-2 font-mono text-[11px] break-all text-gray-500 select-all">{url}</p>
+        <p className="rounded-lg bg-gray-50 px-3 py-2 font-mono text-[12px] break-all text-gray-700 ring-1 ring-gray-200 select-all ring-inset">{url}</p>
         <Alert tone="warning">ใครมีลิงก์นี้ก็เซ็นรายการนี้ได้ภายใน 1 ชั่วโมง ส่งให้เฉพาะผู้เกี่ยวข้อง</Alert>
       </div>
     </Dialog>

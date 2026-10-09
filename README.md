@@ -87,7 +87,7 @@ Rate limiting is per session (not per IP) because SSR calls come from the Next.j
 
 Generate SQL with `prisma migrate diff` (non-interactive), then **review it**: Prisma does not know about the hand-written
 partial/`NULLS NOT DISTINCT` unique indexes and exclusion constraints and will try to `DROP` them
-(`time_entry_employee_engagement_date_live_key`, `engagement_customer_category_period_key`, `role_assignment_unique_scope`).
+(`time_entry_employee_engagement_date_live_key`, `engagement_customer_category_period_key`, `role_assignment_unique_scope`, `revenue_entry_batch_doc_key`).
 Remove those drops. The `schema guard` integration test fails if any of them goes missing.
 
 ## Run locally

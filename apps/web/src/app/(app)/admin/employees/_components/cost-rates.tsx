@@ -39,7 +39,7 @@ export function CostRates() {
     setEditing(null);
     setImporting(false);
     void qc.invalidateQueries({ queryKey: ['cost-rates'] });
-    void qc.invalidateQueries({ queryKey: ['customer-cost'] });
+    void qc.invalidateQueries({ queryKey: ['analytics'] });
   };
   const empty = q.data && q.data.levels.every((l) => !l.periods.length);
 

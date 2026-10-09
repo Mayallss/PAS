@@ -30,7 +30,11 @@
   --color-pas-green: #0e9747;
   --color-pas-yellow: #fccb0f;
 
-  --shadow-card: 0 1px 2px 0 rgb(0 0 0 / 0.04), 0 1px 3px 0 rgb(0 0 0 / 0.03);
+  /* Page canvas a step darker than white cards, sidebar a step darker again: panels read as separate surfaces. */
+  --color-canvas: #eef0f3;
+  --color-sidebar: #e5e7ec;
+
+  --shadow-card: 0 1px 2px 0 rgb(16 24 40 / 0.06), 0 1px 3px 0 rgb(16 24 40 / 0.1);
   --shadow-pop: 0 10px 30px -10px rgb(0 0 0 / 0.25), 0 4px 10px -6px rgb(0 0 0 / 0.1);
 
   --animate-shimmer: shimmer 1.6s linear infinite;
@@ -81,7 +85,7 @@
     -webkit-text-size-adjust: 100%;
   }
   body {
-    background: var(--color-gray-50);
+    background: var(--color-canvas);
     color: var(--color-gray-900);
     font-feature-settings: 'cv11', 'ss01';
   }

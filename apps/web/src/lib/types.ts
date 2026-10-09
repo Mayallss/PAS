@@ -18,6 +18,7 @@ export type Permission =
   | 'room.manage'
   | 'cost.read'
   | 'cost.write'
+  | 'revenue.write'
   | 'audit.read';
 
 /** Role keys are data now (custom roles allowed); these are the built-in ones. */

@@ -3,47 +3,65 @@
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { ChevronLeft, ChevronRight, Download, Inbox, Users } from 'lucide-react';
 import Link from 'next/link';
-import { useState } from 'react';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
+import { Suspense, useState } from 'react';
 import { Alert, Badge, Button, Card, Empty, inputClass, Loading, PageHeader, Progress } from '@/components/ui';
 import { api, errorMessage } from '@/lib/api';
 import { addDays, currentMonth, hours, mondayOf, shiftMonth, STATUS_STYLE, THAI_WEEKDAY_SHORT, thaiDate, thaiDateShort, thaiMonth, todayBangkok, weekLabel } from '@/lib/format';
 import { can, useSession } from '@/lib/session';
 import type { DayStatus } from '@/lib/types';
-import { CustomerCost } from './_components/customer-cost';
+import { CostExplorer } from './_components/cost-explorer';
+import { RevenueImport } from './_components/revenue-import';
 
 const TABS = [
   ['completeness', 'ความครบรายสัปดาห์'],
   ['timesheet', 'เวลารายเดือน'],
-  ['customers', 'ลูกค้า (ชั่วโมง / ต้นทุน)'],
+  ['customers', 'ต้นทุน / กำไร (วิเคราะห์)'],
   ['leave', 'รายการลา'],
+  ['revenue', 'รายได้ (นำเข้า)'],
 ] as const;
 type Tab = (typeof TABS)[number][0];
 
 export default function ReportsPage() {
-  const me = useSession();
-  const [tab, setTab] = useState<Tab>('completeness');
   return (
-    <div>
+    <Suspense fallback={<Loading rows={6} />}>
+      <Reports />
+    </Suspense>
+  );
+}
+
+function Reports() {
+  const me = useSession();
+  const params = useSearchParams();
+  const router = useRouter();
+  const pathname = usePathname();
+  // In the URL so a drilled-down view (filters live there too) survives reload, Back and sharing.
+  // Importing revenue needs revenue.write: without it the tab is not shown, and a link to it opens the default tab.
+  const tabs = TABS.filter(([k]) => k !== 'revenue' || can(me, 'revenue.write'));
+  const tab = (tabs.find(([k]) => k === params.get('tab'))?.[0] ?? 'completeness') as Tab;
+  return (
+    <div className="min-w-0">
       <PageHeader title="รายงาน" description="ข้อมูลตามขอบเขตสิทธิ์ของคุณ — Manager เห็นเฉพาะทีมที่ดูแล" />
-      <div role="tablist" aria-label="ประเภทรายงาน" className="mb-5 inline-flex flex-wrap gap-1 rounded-lg bg-gray-100 p-1">
-        {TABS.map(([key, label]) => (
+      <div role="tablist" aria-label="ประเภทรายงาน" className="mb-5 inline-flex flex-wrap gap-1 rounded-lg bg-white p-1 shadow-card ring-1 ring-gray-300">
+        {tabs.map(([key, label]) => (
           <button
             key={key}
             role="tab"
             type="button"
             aria-selected={tab === key}
-            onClick={() => setTab(key)}
-            className={`h-8 rounded-md px-3 text-[13px] font-medium transition ${tab === key ? 'bg-white text-gray-900 shadow-card' : 'text-gray-500 hover:text-gray-900'}`}
+            onClick={() => router.push(`${pathname}?tab=${key}`, { scroll: false })}
+            className={`h-8 rounded-md px-3 text-[13px] font-medium transition ${tab === key ? 'bg-brand-600 text-white shadow-sm' : 'text-gray-700 hover:bg-gray-100 hover:text-gray-900'}`}
           >
-            {label}
+            {key === 'customers' && !can(me, 'cost.read') ? 'ชั่วโมงตามลูกค้า (วิเคราะห์)' : label}
           </button>
         ))}
       </div>
-      <div role="tabpanel">
+      <div role="tabpanel" className="min-w-0">
         {tab === 'completeness' && <Completeness />}
         {tab === 'timesheet' && <Timesheet />}
-        {tab === 'customers' && (can(me, 'cost.read') ? <CustomerCost /> : <CustomerEffort />)}
+        {tab === 'customers' && <CostExplorer />}
         {tab === 'leave' && <Leave />}
+        {tab === 'revenue' && <RevenueImport />}
       </div>
     </div>
   );
@@ -226,70 +244,6 @@ function useRange() {
     </div>
   );
   return { from, to, inputs, valid: !!from && !!to && from <= to };
-}
-
-function CustomerEffort() {
-  const { from, to, inputs, valid } = useRange();
-  const q = useQuery({
-    queryKey: ['customer-effort', from, to],
-    enabled: valid,
-    placeholderData: keepPreviousData,
-    queryFn: () =>
-      api<{ levels: { code: string; name: string }[]; customers: { id: string; code: string; name: string; accountOwner: string | null; totalMinutes: number; byLevel: Record<string, number> }[] }>(
-        '/reports/customer-effort',
-        { query: { from, to } },
-      ),
-  });
-  const max = Math.max(1, ...(q.data?.customers.map((c) => c.totalMinutes) ?? [1]));
-  return (
-    <Card title="ชั่วโมงตามลูกค้า" description="แยกตามระดับพนักงาน · ยังไม่แสดงต้นทุนจนกว่าจะยืนยันหน่วยอัตรา" actions={inputs} bodyClassName={q.isPlaceholderData ? 'opacity-60' : ''}>
-      {q.isLoading ? (
-        <div className="p-5"><Loading /></div>
-      ) : q.error ? (
-        <div className="p-5"><Alert tone="error">{errorMessage(q.error)}</Alert></div>
-      ) : !q.data?.customers.length ? (
-        <Empty icon={<Inbox className="h-5 w-5" />} title="ไม่มีข้อมูลในช่วงนี้" />
-      ) : (
-        <div className="overflow-x-auto">
-          <table className="min-w-full text-[13px]">
-            <thead className="text-left text-[12px] text-gray-500">
-              <tr className="border-b border-gray-200">
-                <th className="px-5 py-2 font-medium">ลูกค้า</th>
-                <th className="px-3 py-2 font-medium">ผู้ดูแล</th>
-                {q.data.levels.map((l) => (
-                  <th key={l.code} className="px-3 py-2 text-right font-medium" title={l.name}>
-                    {l.code}
-                  </th>
-                ))}
-                <th className="w-56 px-5 py-2 text-right font-medium">รวม (ชม.)</th>
-              </tr>
-            </thead>
-            <tbody>
-              {q.data.customers.map((c) => (
-                <tr key={c.id} className="border-b border-gray-100 hover:bg-gray-50/60">
-                  <td className="px-5 py-2.5">
-                    <span className="font-mono text-[12px] text-gray-500">{c.code}</span> <span className="text-gray-900">{c.name}</span>
-                  </td>
-                  <td className="px-3 py-2.5 text-gray-600">{c.accountOwner ?? '–'}</td>
-                  {q.data.levels.map((l) => (
-                    <td key={l.code} className="px-3 py-2.5 text-right text-gray-600 tabular-nums">
-                      {hours(c.byLevel[l.code] ?? 0)}
-                    </td>
-                  ))}
-                  <td className="px-5 py-2.5">
-                    <div className="flex items-center justify-end gap-3">
-                      <Progress className="w-24" value={c.totalMinutes} max={max} />
-                      <span className="w-12 text-right font-semibold tabular-nums">{hours(c.totalMinutes)}</span>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </Card>
-  );
 }
 
 function Leave() {
