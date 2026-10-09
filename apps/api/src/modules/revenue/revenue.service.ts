@@ -30,6 +30,8 @@ export interface IngestRow extends ParsedRow {
  */
 export interface IngestInput {
   source: RevenueSource;
+  /** TRCLOUD company (PAS | PC | PA) for source API. */
+  company?: string | null;
   fileName?: string | null;
   externalRef?: string | null;
   contentHash: string;
@@ -114,7 +116,8 @@ export class RevenueService {
     );
   }
 
-  async ingest(input: IngestInput, user: AuthUser, req?: AppRequest) {
+  /** `user` null = the automatic TRCLOUD sync. */
+  async ingest(input: IngestInput, user: AuthUser | null, req?: AppRequest) {
     if (input.periodFrom > input.periodTo) throw new DomainError('BAD_PERIOD', 'ช่วงเดือนของรายได้ไม่ถูกต้อง');
     if (!input.rows.length) throw new DomainError('FILE_EMPTY', 'ไม่มีแถวรายได้');
     if (input.externalRef) {
@@ -128,11 +131,12 @@ export class RevenueService {
 
     return this.prisma.$transaction(async (tx) => {
       const replaced = input.replaceBatchIds?.length
-        ? await tx.revenueBatch.updateMany({ where: { id: { in: input.replaceBatchIds }, voidedAt: null }, data: { voidedAt: new Date(), voidedById: user.id, voidReason: 'แทนที่ด้วยการนำเข้าใหม่' } })
+        ? await tx.revenueBatch.updateMany({ where: { id: { in: input.replaceBatchIds }, voidedAt: null }, data: { voidedAt: new Date(), voidedById: user?.id ?? null, voidReason: 'แทนที่ด้วยการนำเข้าใหม่' } })
         : { count: 0 };
       const batch = await tx.revenueBatch.create({
         data: {
           source: input.source,
+          company: input.company ?? null,
           fileName: input.fileName ?? null,
           externalRef: input.externalRef ?? null,
           contentHash: input.contentHash,
@@ -141,7 +145,7 @@ export class RevenueService {
           rowCount: input.rows.length,
           totalAmount: new Prisma.Decimal(total),
           note: input.note || null,
-          createdById: user.id,
+          createdById: user?.id ?? null,
         },
       });
       await tx.revenueEntry.createMany({
@@ -220,7 +224,7 @@ export class RevenueService {
       totalAmount: Number(b.totalAmount),
       unmatched: un.get(b.id) ?? { rows: 0, amount: 0 },
       note: b.note,
-      createdBy: b.createdBy.fullName,
+      createdBy: b.createdBy?.fullName ?? 'TRCLOUD (อัตโนมัติ)',
       createdAt: b.createdAt,
       voidedAt: b.voidedAt,
       voidedBy: b.voidedBy?.fullName ?? null,
@@ -304,27 +308,34 @@ export class RevenueService {
         amount: true,
         customerId: true,
         docDate: true,
-        batch: { select: { id: true, periodFrom: true, periodTo: true } },
+        batch: { select: { id: true, periodFrom: true, periodTo: true, company: true } },
         customer: { select: { id: true, code: true, name: true, accountOwner: { select: { fullName: true } } } },
       },
     });
-    const byCustomer = new Map<string, { id: string; code: string; name: string; owner: string | null; amount: number }>();
+    // Per company: the TRCLOUD company that billed it (PAS / PC / PA), "EXCEL" for imported files. Added up, never deduplicated.
+    const byCustomer = new Map<string, { id: string; code: string; name: string; owner: string | null; amount: number; byCompany: Record<string, number> }>();
+    const byCompany: Record<string, number> = {};
     let unmatched = 0;
     const batches = new Set<string>();
     for (const e of entries) {
       batches.add(e.batch.id);
       const share = e.docDate ? Number(e.amount) : prorate(Number(e.amount), { from: toIsoDate(e.batch.periodFrom), to: toIsoDate(e.batch.periodTo) }, { from, to });
+      const company = e.batch.company ?? 'EXCEL';
+      byCompany[company] = (byCompany[company] ?? 0) + share;
       if (!e.customer) {
         unmatched += share;
         continue;
       }
-      const c = byCustomer.get(e.customer.id) ?? { id: e.customer.id, code: e.customer.code, name: e.customer.name, owner: e.customer.accountOwner?.fullName ?? null, amount: 0 };
+      const c = byCustomer.get(e.customer.id) ?? { id: e.customer.id, code: e.customer.code, name: e.customer.name, owner: e.customer.accountOwner?.fullName ?? null, amount: 0, byCompany: {} };
       c.amount += share;
+      c.byCompany[company] = (c.byCompany[company] ?? 0) + share;
       byCustomer.set(c.id, c);
     }
+    const rounded = (m: Record<string, number>) => Object.fromEntries(Object.entries(m).map(([k, v]) => [k, round2(v)]));
     return {
-      customers: [...byCustomer.values()].map((c) => ({ ...c, amount: round2(c.amount) })),
+      customers: [...byCustomer.values()].map((c) => ({ ...c, amount: round2(c.amount), byCompany: rounded(c.byCompany) })),
       unmatched: round2(unmatched),
+      byCompany: rounded(byCompany),
       batches: batches.size,
     };
   }

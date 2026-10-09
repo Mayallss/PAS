@@ -395,8 +395,6 @@ model Customer {
   code           String         @unique
   name           String
   taxId          String?        @map("tax_id")
-  /// Contact code (#code) of this customer in TRCLOUD — invoices are linked by it. Set by the contact sync.
-  trcloudCode    String?        @unique @map("trcloud_code")
   address        String?
   accountOwnerId String?        @map("account_owner_id") @db.Uuid
   accountOwner   Employee?      @relation("CustomerOwner", fields: [accountOwnerId], references: [id])
@@ -405,8 +403,25 @@ model Customer {
   createdAt      DateTime       @default(now()) @map("created_at")
   updatedAt      DateTime       @updatedAt @map("updated_at")
   revenueEntries RevenueEntry[]
+  /// Its contact in each of the group's TRCLOUD companies (PAS / PC / PA); set by the contact sync.
+  trcloudLinks   CustomerTrcloudLink[]
 
   @@map("customer")
+}
+
+/// One customer ↔ one TRCLOUD contact per company. Invoices are linked to customers by (company, contact code).
+model CustomerTrcloudLink {
+  id          String   @id @default(uuid()) @db.Uuid
+  customerId  String   @map("customer_id") @db.Uuid
+  customer    Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  /// PAS | PC | PA (check constraint in migration SQL)
+  company     String
+  /// The contact's "#code" in that company
+  contactCode String   @map("contact_code")
+
+  @@unique([company, contactCode])
+  @@unique([customerId, company])
+  @@map("customer_trcloud_link")
 }
 
 /// Service catalogue as a tree, e.g. "Accounting" › "ปิดบัญชี - รายปี" (legacy encoded this in the name).
@@ -1439,11 +1454,14 @@ model RevenueBatch {
   /// The period the income belongs to (the file has no dates; chosen at import).
   periodFrom  DateTime       @map("period_from") @db.Date
   periodTo    DateTime       @map("period_to") @db.Date
+  /// TRCLOUD company (PAS | PC | PA) for source API; null for Excel. Check constraint in migration SQL.
+  company     String?
   rowCount    Int            @map("row_count")
   totalAmount Decimal        @map("total_amount") @db.Decimal(16, 2)
   note        String?
-  createdById String         @map("created_by_id") @db.Uuid
-  createdBy   Employee       @relation("RevenueBatchCreator", fields: [createdById], references: [id])
+  /// Null when the automatic TRCLOUD sync made it.
+  createdById String?        @map("created_by_id") @db.Uuid
+  createdBy   Employee?      @relation("RevenueBatchCreator", fields: [createdById], references: [id], onDelete: Restrict)
   createdAt   DateTime       @default(now()) @map("created_at")
   voidedAt    DateTime?      @map("voided_at")
   voidedById  String?        @map("voided_by_id") @db.Uuid

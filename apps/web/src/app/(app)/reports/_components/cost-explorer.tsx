@@ -23,6 +23,7 @@ import {
   autoGrain,
   baht,
   bahtRound,
+  companySplit,
   type Basis,
   type Bucket,
   buckets,
@@ -268,7 +269,7 @@ export function CostExplorer() {
 
 // ---------------------------------------------------------------------------
 
-type Pl = { revenue: number; cost: number } | null;
+type Pl = { revenue: number; cost: number; byCompany?: Record<string, number> } | null;
 
 function Kpis({
   total,
@@ -294,7 +295,9 @@ function Kpis({
   const profit = pl ? pl.revenue - pl.cost : 0;
   return (
     <div className={`grid grid-cols-2 gap-3 ${pl ? 'lg:grid-cols-3' : priced ? 'lg:grid-cols-4' : 'lg:grid-cols-3'}`}>
-      {pl && <Tile label="รายได้ (นำเข้า)" value={`฿${bahtRound(pl.revenue)}`} exact={`฿${baht(pl.revenue)}`} now={pl.revenue} before={prevPl?.revenue} vs={vs} />}
+      {pl && (
+        <Tile label="รายได้" value={`฿${bahtRound(pl.revenue)}`} exact={`฿${baht(pl.revenue)}`} now={pl.revenue} before={prevPl?.revenue} vs={vs} note={companySplit(pl.byCompany, bahtRound) ?? undefined} />
+      )}
       {pl && (
         <Tile
           label="กำไรขั้นต้น"
@@ -312,7 +315,8 @@ function Kpis({
   );
 }
 
-function Tile({ label, value, exact, sub, now, before, vs }: { label: string; value: string; exact?: string; sub?: string; now?: number; before?: number; vs?: string }) {
+/** note: always shown under the figure (e.g. revenue per group company). */
+function Tile({ label, value, exact, sub, note, now, before, vs }: { label: string; value: string; exact?: string; sub?: string; note?: string; now?: number; before?: number; vs?: string }) {
   const pct = before && now !== undefined ? ((now - before) / before) * 100 : null;
   return (
     <div className="min-w-0 rounded-xl bg-white p-4 shadow-card ring-1 ring-gray-300/80">
@@ -329,6 +333,11 @@ function Tile({ label, value, exact, sub, now, before, vs }: { label: string; va
         </p>
       ) : (
         sub && <p className="mt-1 truncate text-[12px] text-gray-600">{sub}</p>
+      )}
+      {note && (
+        <p className="mt-1 truncate text-[12px] text-gray-600" title={note}>
+          {note}
+        </p>
       )}
     </div>
   );

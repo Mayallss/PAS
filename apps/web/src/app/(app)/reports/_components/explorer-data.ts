@@ -28,10 +28,23 @@ export interface Analytics {
 }
 
 export interface RevenueForRange {
-  customers: { id: string; code: string; name: string; owner: string | null; amount: number }[];
+  /** byCompany: the group company that billed it (PAS / PC / PA; EXCEL = imported file) — added up, never deduplicated. */
+  customers: { id: string; code: string; name: string; owner: string | null; amount: number; byCompany?: Record<string, number> }[];
   /** Revenue rows not matched to a customer yet — counted in the total, not per customer. */
   unmatched: number;
+  byCompany?: Record<string, number>;
   batches: number;
+}
+
+/** "PAS ฿1,000 · PC ฿2,500" — only when more than one source billed. */
+export function companySplit(m: Record<string, number> | undefined, fmt: (n: number) => string): string | null {
+  const parts = Object.entries(m ?? {}).filter(([, v]) => v);
+  if (parts.length < 2) return null;
+  const order = ['PAS', 'PC', 'PA', 'EXCEL'];
+  return parts
+    .sort(([a], [b]) => order.indexOf(a) - order.indexOf(b))
+    .map(([k, v]) => `${k === 'EXCEL' ? 'Excel' : k} ฿${fmt(v)}`)
+    .join(' · ');
 }
 
 // ---------------------------------------------------------------------------
@@ -53,12 +66,14 @@ export interface ProfitRow {
   margin: number | null;
   unpricedMinutes: number;
   hasRevenue: boolean;
+  /** Revenue per billing company (PAS / PC / PA / EXCEL). */
+  byCompany: Record<string, number>;
 }
 
-export function profitByCustomer(d: Analytics, rows: Row[], filters: Filters): { list: ProfitRow[]; revenue: number; cost: number; unmatched: number } {
+export function profitByCustomer(d: Analytics, rows: Row[], filters: Filters): { list: ProfitRow[]; revenue: number; cost: number; unmatched: number; byCompany: Record<string, number> } {
   const map = new Map<string, ProfitRow>();
   const row = (id: string, code: string, name: string) =>
-    map.get(id) ?? map.set(id, { id, code, name, revenue: 0, cost: 0, profit: 0, margin: null, unpricedMinutes: 0, hasRevenue: false }).get(id)!;
+    map.get(id) ?? map.set(id, { id, code, name, revenue: 0, cost: 0, profit: 0, margin: null, unpricedMinutes: 0, hasRevenue: false, byCompany: {} }).get(id)!;
   for (const r of rows) {
     const c = d.customers[r[1]];
     const p = row(c.id, c.code, c.name);
@@ -72,10 +87,13 @@ export function profitByCustomer(d: Analytics, rows: Row[], filters: Filters): {
     const p = row(c.id, c.code, c.name);
     p.revenue += c.amount;
     p.hasRevenue = true;
+    for (const [k, v] of Object.entries(c.byCompany ?? {})) p.byCompany[k] = (p.byCompany[k] ?? 0) + v;
   }
   const list = [...map.values()].map((p) => ({ ...p, profit: p.revenue - p.cost, margin: p.revenue ? (p.revenue - p.cost) / p.revenue : null }));
   const unmatched = filters.customer === undefined && filters.owner === undefined ? (d.revenue?.unmatched ?? 0) : 0;
-  return { list, revenue: list.reduce((a, p) => a + p.revenue, 0) + unmatched, cost: list.reduce((a, p) => a + p.cost, 0), unmatched };
+  const byCompany: Record<string, number> = {};
+  for (const p of list) for (const [k, v] of Object.entries(p.byCompany)) byCompany[k] = (byCompany[k] ?? 0) + v;
+  return { list, revenue: list.reduce((a, p) => a + p.revenue, 0) + unmatched, cost: list.reduce((a, p) => a + p.cost, 0), unmatched, byCompany };
 }
 
 export type Metric = 'cost' | 'hours';

@@ -2,13 +2,18 @@
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useDeferredValue, useState } from 'react';
-import { Alert, Button, Card, Dialog, Empty, Field, inputClass, Loading, PageHeader } from '@/components/ui';
+import { Alert, Badge, Button, Card, Dialog, Empty, Field, inputClass, Loading, PageHeader } from '@/components/ui';
 import { api, errorMessage } from '@/lib/api';
+import { can, useSession } from '@/lib/session';
 import type { CustomerOption, EngagementOption } from '@/lib/types';
 import { Activities, type Activity } from './activities';
+import { trcloudStatusQuery } from '@/lib/trcloud';
+import { TrcloudCustomersBar } from './trcloud-bar';
 
 interface CustomerForm {
   id?: string;
+  /** From TRCLOUD: code, name, tax id, address and active state are TRCLOUD's (read-only here). */
+  trcloud?: boolean;
   code: string;
   name: string;
   taxId: string;
@@ -21,7 +26,9 @@ const emptyForm: CustomerForm = { code: '', name: '', taxId: '', address: '', ac
 
 export default function CustomersAdminPage() {
   const qc = useQueryClient();
+  const me = useSession();
   const [search, setSearch] = useState('');
+  const [showClosed, setShowClosed] = useState(false);
   const deferred = useDeferredValue(search.trim());
   const [editing, setEditing] = useState<CustomerForm | null>(null);
   const [selected, setSelected] = useState<CustomerOption | null>(null);
@@ -31,6 +38,9 @@ export default function CustomersAdminPage() {
     queryKey: ['admin-customers', deferred],
     queryFn: () => api<CustomerOption[]>('/catalog/customers', { query: { search: deferred, includeInactive: 'true' } }),
   });
+  const trcloud = useQuery({ ...trcloudStatusQuery, enabled: can(me, 'revenue.write', 'catalog.write') });
+  const trcloudOn = !!trcloud.data?.enabled;
+  const shown = (customers.data ?? []).filter((c) => showClosed || c.isActive);
   const employees = useQuery({ queryKey: ['employees'], queryFn: () => api<{ id: string; fullName: string; status: string }[]>('/employees') });
 
   const save = useMutation({
@@ -57,21 +67,28 @@ export default function CustomersAdminPage() {
   return (
     <div className="space-y-4">
       <PageHeader title="ลูกค้าและ Activity" description="ลูกค้า (JOB) และ Activity ที่แต่ละลูกค้าเปิดให้พนักงานลงเวลาได้" />
+      {can(me, 'revenue.write', 'catalog.write') && <TrcloudCustomersBar />}
       <div className="grid gap-4 xl:grid-cols-[3fr_2fr]">
         <Card
           title="ลูกค้า"
           actions={
             <>
+              <label className="flex cursor-pointer items-center gap-1.5 text-[13px] text-gray-700">
+                <input type="checkbox" checked={showClosed} onChange={(e) => setShowClosed(e.target.checked)} /> แสดงที่ปิดแล้ว
+              </label>
               <input aria-label="ค้นหาลูกค้า" className={`${inputClass} w-56 py-1`} placeholder="ค้นหารหัส / ชื่อ" value={search} onChange={(e) => setSearch(e.target.value)} />
-              <Button size="sm" variant="primary" onClick={() => { setError(null); setEditing({ ...emptyForm }); }}>
-                + เพิ่มลูกค้า
-              </Button>
+              {/* With TRCLOUD, customers are added in TRCLOUD: one added here would be removed by the next sync. */}
+              {!trcloudOn && (
+                <Button size="sm" variant="primary" onClick={() => { setError(null); setEditing({ ...emptyForm }); }}>
+                  + เพิ่มลูกค้า
+                </Button>
+              )}
             </>
           }
         >
           {customers.isLoading ? (
             <Loading />
-          ) : !customers.data?.length ? (
+          ) : !shown.length ? (
             <Empty>ไม่พบลูกค้า</Empty>
           ) : (
             <div className="max-h-[70vh] overflow-auto">
@@ -86,12 +103,28 @@ export default function CustomersAdminPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {customers.data.map((c) => (
+                  {shown.map((c) => (
                     <tr key={c.id} className={`border-b border-gray-100 ${selected?.id === c.id ? 'bg-brand-50' : ''}`}>
                       <td className="py-1.5 pr-2 font-mono">{c.code}</td>
-                      <td className="py-1.5 pr-2">{c.name}</td>
+                      <td className="py-1.5 pr-2">
+                        {c.name}
+                        {trcloudOn && !!c.trcloudLinks?.length && (
+                          <span className="ml-2 inline-flex gap-1 align-middle">
+                            {c.trcloudLinks.map((l) => (
+                              <span key={l.company} title={`${l.company}: ${l.contactCode}`}>
+                                <Badge tone="brand">{l.company}</Badge>
+                              </span>
+                            ))}
+                          </span>
+                        )}
+                        {trcloudOn && !c.trcloudLinks?.length && c.isActive && (
+                          <span className="ml-2 inline-block align-middle">
+                            <Badge tone="gray">ภายใน · ไม่ซิงก์</Badge>
+                          </span>
+                        )}
+                      </td>
                       <td className="py-1.5 pr-2">{c.accountOwner?.fullName ?? '-'}</td>
-                      <td className="py-1.5 pr-2">{c.isActive ? 'ใช้งาน' : <span className="text-gray-500">ปิด</span>}</td>
+                      <td className="py-1.5 pr-2">{c.isActive ? 'ใช้งาน' : <span className="text-gray-500">{trcloudOn ? 'ปิด (ไม่มีใน TRCLOUD)' : 'ปิด'}</span>}</td>
                       <td className="py-1.5 text-right whitespace-nowrap">
                         <Button size="sm" variant="ghost" onClick={() => setSelected(c)}>
                           งาน
@@ -101,7 +134,7 @@ export default function CustomersAdminPage() {
                           variant="ghost"
                           onClick={() => {
                             setError(null);
-                            setEditing({ id: c.id, code: c.code, name: c.name, taxId: c.taxId ?? '', address: c.address ?? '', accountOwnerId: c.accountOwner?.id ?? '', isActive: c.isActive });
+                            setEditing({ id: c.id, trcloud: !!c.trcloudLinks?.length, code: c.code, name: c.name, taxId: c.taxId ?? '', address: c.address ?? '', accountOwnerId: c.accountOwner?.id ?? '', isActive: c.isActive });
                           }}
                         >
                           แก้ไข
@@ -136,17 +169,22 @@ export default function CustomersAdminPage() {
       >
         {editing && (
           <>
-            <Field label="รหัสลูกค้า" hint="แก้ไขได้ภายหลังโดยไม่กระทบข้อมูลเวลาเดิม">
-              <input className={inputClass} maxLength={20} value={editing.code} onChange={(e) => setEditing({ ...editing, code: e.target.value.toUpperCase() })} />
+            {editing.trcloud ? (
+              <Alert tone="info">ลูกค้านี้มาจาก TRCLOUD — รหัส ชื่อ เลขภาษี ที่อยู่ และสถานะ ให้แก้ที่ TRCLOUD แล้วระบบจะซิงก์ให้ ที่นี่แก้ได้เฉพาะผู้ดูแลลูกค้า</Alert>
+            ) : (
+              trcloudOn && <Alert tone="info">ลูกค้าภายใน (มีงานภายใน / ประชุม / ลา) ไม่ซิงก์กับ TRCLOUD และไม่ถูกเอาออก</Alert>
+            )}
+            <Field label="รหัสลูกค้า" hint={editing.trcloud ? 'รหัสคู่ค้า (#code) ใน TRCLOUD — ใช้ของ PAS ก่อน ถ้าไม่มีใช้ PC แล้ว PA' : 'แก้ไขได้ภายหลังโดยไม่กระทบข้อมูลเวลาเดิม'}>
+              <input className={inputClass} maxLength={40} disabled={editing.trcloud} value={editing.code} onChange={(e) => setEditing({ ...editing, code: e.target.value.toUpperCase().replace(/\s+/g, '') })} />
             </Field>
             <Field label="ชื่อ">
-              <input className={inputClass} maxLength={200} value={editing.name} onChange={(e) => setEditing({ ...editing, name: e.target.value })} />
+              <input className={inputClass} maxLength={200} disabled={editing.trcloud} value={editing.name} onChange={(e) => setEditing({ ...editing, name: e.target.value })} />
             </Field>
             <Field label="เลขประจำตัวผู้เสียภาษี" hint="13 หลัก (ไม่บังคับ)">
-              <input className={inputClass} inputMode="numeric" maxLength={13} value={editing.taxId} onChange={(e) => setEditing({ ...editing, taxId: e.target.value.replace(/\D/g, '') })} />
+              <input className={inputClass} inputMode="numeric" maxLength={13} disabled={editing.trcloud} value={editing.taxId} onChange={(e) => setEditing({ ...editing, taxId: e.target.value.replace(/\D/g, '') })} />
             </Field>
             <Field label="ที่อยู่">
-              <textarea className={inputClass} rows={2} maxLength={500} value={editing.address} onChange={(e) => setEditing({ ...editing, address: e.target.value })} />
+              <textarea className={inputClass} rows={2} maxLength={500} disabled={editing.trcloud} value={editing.address} onChange={(e) => setEditing({ ...editing, address: e.target.value })} />
             </Field>
             <Field label="ผู้ดูแลลูกค้า">
               <select className={inputClass} value={editing.accountOwnerId} onChange={(e) => setEditing({ ...editing, accountOwnerId: e.target.value })}>
@@ -159,7 +197,7 @@ export default function CustomersAdminPage() {
               </select>
             </Field>
             <label className="flex items-center gap-2 text-sm">
-              <input type="checkbox" checked={editing.isActive} onChange={(e) => setEditing({ ...editing, isActive: e.target.checked })} /> ใช้งาน
+              <input type="checkbox" disabled={editing.trcloud} checked={editing.isActive} onChange={(e) => setEditing({ ...editing, isActive: e.target.checked })} /> ใช้งาน
             </label>
             {error && <Alert tone="error">{error}</Alert>}
           </>

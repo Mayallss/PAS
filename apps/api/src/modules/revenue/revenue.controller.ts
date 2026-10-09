@@ -31,8 +31,10 @@ const month = z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/, 'ต้องเป็
 const invoicePeriod = z.object({ from: month, to: month });
 const invoiceCommit = invoicePeriod.extend({ replaceExcelIds: z.array(z.string().uuid()).max(50).default([]) });
 const contactDecisions = z.object({
-  decisions: z.array(z.object({ code: z.string().trim().min(1).max(64), customerId: z.string().uuid().nullable() })).max(20000).default([]),
+  /** key = "company:code" (PAS:ก001) — the same code can exist in two companies. */
+  decisions: z.array(z.object({ key: z.string().trim().regex(/^(PAS|PC|PA):.{1,64}$/), customerId: z.union([z.string().uuid(), z.literal('NEW')]).nullable() })).max(20000).default([]),
 });
+const refreshBody = z.object({ force: z.boolean().default(false) });
 const assignBody = z.object({ customerId: z.string().uuid().nullable(), remember: z.boolean().default(true) });
 
 @Controller('revenue')
@@ -47,8 +49,17 @@ export class RevenueController {
   // --- TRCLOUD (each preview / apply spends API quota: called on a person's click only) ---
 
   @Get('trcloud/status')
-  trcloudStatus() {
-    return { enabled: !!this.trcloudClient.settings() };
+  @RequirePermission('revenue.write', 'catalog.write')
+  async trcloudStatus() {
+    const companies = this.trcloudClient.companies();
+    return { enabled: companies.length > 0, companies, ...(await this.trcloud.lastSyncs()) };
+  }
+
+  /** Customers / revenue pages: contacts → customers, then recent revenue, when the last sync is stale (or `force`). */
+  @Post('trcloud/refresh')
+  @RequirePermission('revenue.write', 'catalog.write')
+  contactsRefresh(@Body(new ZodPipe(refreshBody)) body: z.infer<typeof refreshBody>, @Req() req: AppRequest) {
+    return this.trcloud.refresh(body.force, req);
   }
 
   @Post('trcloud/contacts/preview')
@@ -57,8 +68,8 @@ export class RevenueController {
   }
 
   @Post('trcloud/contacts/apply')
-  contactsApply(@CurrentUser() user: AuthUser, @Body(new ZodPipe(contactDecisions)) body: z.infer<typeof contactDecisions>, @Req() req: AppRequest) {
-    return this.trcloud.contactsApply(user, body.decisions, req);
+  contactsApply(@Body(new ZodPipe(contactDecisions)) body: z.infer<typeof contactDecisions>, @Req() req: AppRequest) {
+    return this.trcloud.contactsApply(body.decisions, req);
   }
 
   @Post('trcloud/invoices/preview')

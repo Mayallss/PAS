@@ -28,3 +28,5 @@ process.env.GOOGLE_SA_PRIVATE_KEY = googleKey.export({ type: 'pkcs8', format: 'p
 process.env.GOOGLE_TEST_PUBLIC_KEY = googlePublicKey.export({ type: 'spki', format: 'pem' }).toString();
 process.env.GOOGLE_COMPANY_CALENDAR_ID = 'company@group.calendar.google.com';
 process.env.CALENDAR_SYNC_INTERVAL_MS = '0';
+process.env.TRCLOUD_SYNC_INTERVAL_MS = '0';
+process.env.TRCLOUD_GROUP_TAX_IDS = '0105599999991';

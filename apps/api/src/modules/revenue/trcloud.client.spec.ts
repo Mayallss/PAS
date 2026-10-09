@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { buildRequest, explain, secureKey } from './trcloud.client';
+import { buildRequest, explain, redact, secureKey } from './trcloud.client';
 
 const s = { baseUrl: 'https://example.trcloud.co/', companyId: '42', passkey: 'pass-xyz', encryptHead: 'head-abc', origin: 'https://portal.example.com' };
 
@@ -30,6 +30,15 @@ describe('TRCLOUD request (manual §4–5)', () => {
   it('read-only: create / update / delete are refused, and the group cannot inject a path', () => {
     expect(() => buildRequest(s, 'contact', 'delete' as 'read', {})).toThrow(/read commands/);
     expect(() => buildRequest(s, '../x', 'search', {})).toThrow(/bad TRCLOUD group/);
+    expect(buildRequest(s, 'report', 'b3', {}).url).toMatch(/end-point\/report\/b3\.php$/); // the invoice report: named, read-only
+    expect(() => buildRequest(s, 'contact', 'b3', {})).toThrow(/read commands/);
+  });
+
+  it('a passkey echoed back by TRCLOUD is never logged or shown', () => {
+    const msg = 'Passkey Error!\nYour data is sent from X\nPasskey 7873a9b2aedb21bab21d00377354d6d4 is not matched; head head-abc; pass-xyz';
+    const out = redact(msg, s);
+    expect(out).not.toMatch(/7873a9b2|head-abc|pass-xyz/);
+    expect(out).toContain('‹hidden›');
   });
 
   it('known TRCLOUD messages become actionable Thai text', () => {

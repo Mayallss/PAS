@@ -1,12 +1,14 @@
 // Shows the SHAPE of a TRCLOUD read endpoint's answer, to map its fields — values are masked.
 //   node --env-file=../../.env scripts/trcloud-probe.mjs <group> <command> ['{"json":"params"}']
 //   e.g. node --env-file=../../.env scripts/trcloud-probe.mjs contact search '{}'
-// Read commands only (search / read). Never prints the passkey or Encrypt Head.
+// Read commands only (search / read, and the read-only reports in READ_REPORTS). Never prints the passkey or Encrypt Head.
 import { createHash } from 'node:crypto';
 
 const [group, command = 'search', rawParams = '{}'] = process.argv.slice(2);
-if (!group || !/^[a-z0-9_]+$/.test(group) || !['search', 'read'].includes(command)) {
-  console.error('usage: trcloud-probe.mjs <group> <search|read> [params-json]');
+// Reports are read-only too, but only the ones named here.
+const READ_REPORTS = ['report/b3'];
+if (!group || !/^[a-z0-9_]+$/.test(group) || !(['search', 'read'].includes(command) || READ_REPORTS.includes(`${group}/${command}`))) {
+  console.error('usage: trcloud-probe.mjs <group> <search|read> [params-json]  (or: report b3)');
   process.exit(2);
 }
 const env = process.env;
@@ -45,6 +47,12 @@ function mask(v, depth = 0) {
   if (typeof v === 'number') return '‹number›';
   return v;
 }
-console.log(`HTTP ${res.status} · success=${data.success} · message=${JSON.stringify(data.message ?? '')}`);
+// TRCLOUD echoes the passkey in some error messages ("Passkey … is not matched"): never print it.
+const redact = (s) =>
+  String(s)
+    .split(env.TRCLOUD_PASSKEY).join('‹passkey›')
+    .split(env.TRCLOUD_ENCRYPT_HEAD).join('‹encrypt-head›')
+    .replace(/\b[0-9a-f]{32}\b/gi, '‹hidden›');
+console.log(`HTTP ${res.status} · success=${data.success} · message=${JSON.stringify(redact(data.message ?? ''))}`);
 const { success, message, ...rest } = data;
 console.log(JSON.stringify(mask(rest), null, 2));

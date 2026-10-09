@@ -10,7 +10,7 @@ import { AlertTriangle, ChevronDown, Upload } from 'lucide-react';
 import Link from 'next/link';
 import { useState } from 'react';
 import { Alert, Card } from '@/components/ui';
-import { baht, bahtRound, hoursText, type ProfitRow } from './explorer-data';
+import { baht, bahtRound, companySplit, hoursText, type ProfitRow } from './explorer-data';
 
 type Sort = 'profit' | 'loss' | 'revenue' | 'margin';
 const SORTS: [Sort, string][] = [
@@ -112,6 +112,7 @@ export function ProfitCard({
                   <span className="block text-[12px] text-gray-600">
                     {p.code} · รายได้ {p.hasRevenue ? `฿${bahtRound(p.revenue)}` : <span className="text-amber-700">ไม่มีนำเข้า</span>} · ต้นทุน ฿{bahtRound(p.cost)} · margin {pct(p.margin)}
                   </span>
+                  {companySplit(p.byCompany, bahtRound) && <span className="block text-[12px] text-gray-500">{companySplit(p.byCompany, bahtRound)}</span>}
                 </span>
                 <span className="flex items-center gap-1.5 text-right text-[13px] whitespace-nowrap tabular-nums">
                   {p.unpricedMinutes > 0 && <AlertTriangle className="h-3.5 w-3.5 text-amber-500" aria-label={`มี ${hoursText(p.unpricedMinutes)} ชม. ที่ไม่มีอัตรา — ต้นทุนจริงอาจสูงกว่านี้`} />}

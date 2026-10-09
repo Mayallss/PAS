@@ -117,6 +117,8 @@ export interface CustomerOption {
   isActive: boolean;
   taxId?: string | null;
   address?: string | null;
+  /** Its contact code in each of the group's TRCLOUD companies (admin list only); set by the contact sync. */
+  trcloudLinks?: { company: string; contactCode: string }[];
   accountOwner?: { id: string; fullName: string } | null;
 }
 

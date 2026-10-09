@@ -16,7 +16,8 @@ const listQuery = z.object({
 });
 const customerBody = z
   .object({
-    code: z.string().trim().min(1).max(20).regex(/^[A-Za-z0-9_-]+$/, 'รหัสใช้ได้เฉพาะ A-Z, 0-9, - และ _'),
+    // TRCLOUD codes may be Thai (e.g. ก001): any letters / digits / - _ . / without spaces.
+    code: z.string().trim().min(1).max(40).regex(/^[\p{L}\p{M}\p{N}_./-]+$/u, 'รหัสใช้ได้เฉพาะตัวอักษร ตัวเลข - _ . / (ไม่มีช่องว่าง)'),
     name: z.string().trim().min(1).max(200),
     taxId: z.string().trim().regex(/^\d{13}$/, 'เลขประจำตัวผู้เสียภาษีต้องมี 13 หลัก').nullish(),
     address: z.string().trim().max(500).nullish(),
@@ -63,7 +64,7 @@ export class CatalogController {
       orderBy: { code: 'asc' },
       take: 1000,
       select: admin
-        ? { id: true, code: true, name: true, taxId: true, address: true, isActive: true, accountOwner: { select: { id: true, fullName: true } } }
+        ? { id: true, code: true, name: true, taxId: true, address: true, isActive: true, trcloudLinks: { select: { company: true, contactCode: true } }, accountOwner: { select: { id: true, fullName: true } } }
         : { id: true, code: true, name: true, isActive: true },
     });
   }
@@ -186,12 +187,17 @@ export class CatalogController {
   @RequirePermission('catalog.write')
   async updateCustomer(@Param('id', ParseUUIDPipe) id: string, @Body(new ZodPipe(customerBody)) body: z.infer<typeof customerBody>, @Req() req: AppRequest) {
     return this.prisma.$transaction(async (tx) => {
-      const before = await tx.customer.findUnique({ where: { id } });
+      const before = await tx.customer.findUnique({ where: { id }, include: { trcloudLinks: { select: { company: true, contactCode: true } } } });
       if (!before) throw notFound('ลูกค้า');
-      const dup = await tx.customer.findUnique({ where: { code: body.code } });
-      if (dup && dup.id !== id) throw new DomainError('DUPLICATE', 'รหัสลูกค้านี้มีอยู่แล้ว', 409);
-      const c = await tx.customer.update({ where: { id }, data: body });
-      await this.audit.record({ action: 'customer.update', resourceType: 'customer', resourceId: id, before, after: body }, req, tx);
+      // A TRCLOUD customer's code, name, tax id, address and active state come from TRCLOUD (the sync would undo edits).
+      const fromTrcloud = before.trcloudLinks.length > 0;
+      const data = fromTrcloud ? { accountOwnerId: body.accountOwnerId } : body;
+      if (!fromTrcloud) {
+        const dup = await tx.customer.findUnique({ where: { code: body.code } });
+        if (dup && dup.id !== id) throw new DomainError('DUPLICATE', 'รหัสลูกค้านี้มีอยู่แล้ว', 409);
+      }
+      const c = await tx.customer.update({ where: { id }, data });
+      await this.audit.record({ action: 'customer.update', resourceType: 'customer', resourceId: id, before, after: data }, req, tx);
       return c;
     });
   }

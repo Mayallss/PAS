@@ -57,6 +57,24 @@ const schema = z.object({
   TRCLOUD_ENCRYPT_HEAD: z.string().optional().default(''),
   /** Sent as the Origin header; must equal the API key's Origin in TRCLOUD (or the key is set to ANY). */
   TRCLOUD_ORIGIN: z.string().optional().default(''),
+  /**
+   * The group's other companies on the same TRCLOUD (user decision 2026-10-09: PAS, PC, PA). TRCLOUD_COMPANY_ID /
+   * PASSKEY / ENCRYPT_HEAD above are PAS; PC and PA each have their own API key. Empty = that company is not synced.
+   */
+  TRCLOUD_PC_COMPANY_ID: z.string().optional().default(''),
+  TRCLOUD_PC_PASSKEY: z.string().optional().default(''),
+  TRCLOUD_PC_ENCRYPT_HEAD: z.string().optional().default(''),
+  TRCLOUD_PA_COMPANY_ID: z.string().optional().default(''),
+  TRCLOUD_PA_PASSKEY: z.string().optional().default(''),
+  TRCLOUD_PA_ENCRYPT_HEAD: z.string().optional().default(''),
+  /** Tax ids of the group's own companies (comma separated): invoices between them are not revenue and they never become customers. */
+  TRCLOUD_GROUP_TAX_IDS: z
+    .string()
+    .default('')
+    .transform((v) => v.split(',').map((x) => x.replace(/\D/g, '')).filter((x) => x.length === 13)),
+  /** Contacts → customers, then the last 12 months of revenue, run on their own this often (also when the customers or
+   *  revenue page opens and the last run is older than 10 minutes); 0 = never on a timer. */
+  TRCLOUD_SYNC_INTERVAL_MS: z.coerce.number().min(0).default(60 * 60 * 1000),
   /** Username + password sign-in (user decision 2026-10-02): on by default so the portal works without Google. "false" turns it off. */
   PASSWORD_LOGIN: z
     .string()
@@ -75,11 +93,23 @@ export interface IntegrationIssue {
   message: string;
 }
 
+/** The group's companies on TRCLOUD. */
+export type TrcloudCompanyKey = 'PAS' | 'PC' | 'PA';
+export const TRCLOUD_COMPANY_KEYS: TrcloudCompanyKey[] = ['PAS', 'PC', 'PA'];
+export interface TrcloudCompany {
+  key: TrcloudCompanyKey;
+  companyId: string;
+  passkey: string;
+  encryptHead: string;
+}
+
 export type AppConfig = z.infer<typeof schema> & {
   oidcEnabled: boolean;
   secureCookies: boolean;
   googleCalendarEnabled: boolean;
   trcloudEnabled: boolean;
+  /** Companies with a complete API key, in priority order (PAS first: its codes and names win). */
+  trcloudCompanies: TrcloudCompany[];
   integrationIssues: IntegrationIssue[];
 };
 
@@ -109,6 +139,14 @@ const INTEGRATION_SETTINGS: Record<string, IntegrationIssue['integration']> = {
   TRCLOUD_PASSKEY: 'trcloud',
   TRCLOUD_ENCRYPT_HEAD: 'trcloud',
   TRCLOUD_ORIGIN: 'trcloud',
+  TRCLOUD_PC_COMPANY_ID: 'trcloud',
+  TRCLOUD_PC_PASSKEY: 'trcloud',
+  TRCLOUD_PC_ENCRYPT_HEAD: 'trcloud',
+  TRCLOUD_PA_COMPANY_ID: 'trcloud',
+  TRCLOUD_PA_PASSKEY: 'trcloud',
+  TRCLOUD_PA_ENCRYPT_HEAD: 'trcloud',
+  TRCLOUD_GROUP_TAX_IDS: 'trcloud',
+  TRCLOUD_SYNC_INTERVAL_MS: 'trcloud',
 };
 
 let cached: AppConfig | undefined;
@@ -165,7 +203,17 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     trcloudEnabled = false;
   }
 
-  cached = { ...parsed, oidcEnabled, secureCookies: parsed.APP_ORIGIN.startsWith('https://'), googleCalendarEnabled, trcloudEnabled, integrationIssues: issues };
+  const trcloudCompanies: TrcloudCompany[] = [];
+  if (trcloudEnabled) {
+    trcloudCompanies.push({ key: 'PAS', companyId: parsed.TRCLOUD_COMPANY_ID, passkey: parsed.TRCLOUD_PASSKEY, encryptHead: parsed.TRCLOUD_ENCRYPT_HEAD });
+    for (const key of ['PC', 'PA'] as const) {
+      const set = [parsed[`TRCLOUD_${key}_COMPANY_ID`], parsed[`TRCLOUD_${key}_PASSKEY`], parsed[`TRCLOUD_${key}_ENCRYPT_HEAD`]];
+      if (set.every(Boolean)) trcloudCompanies.push({ key, companyId: set[0], passkey: set[1], encryptHead: set[2] });
+      else if (set.some(Boolean)) issues.push({ integration: 'trcloud', setting: `TRCLOUD_${key}_*`, message: `ตั้งค่าบริษัท ${key} ไม่ครบ 3 ค่า (COMPANY_ID, PASSKEY, ENCRYPT_HEAD) — ยังไม่ซิงก์บริษัทนี้` });
+    }
+  }
+
+  cached = { ...parsed, oidcEnabled, secureCookies: parsed.APP_ORIGIN.startsWith('https://'), googleCalendarEnabled, trcloudEnabled, trcloudCompanies, integrationIssues: issues };
   for (const i of issues) console.warn(`[config] ${i.integration}: ${i.setting} — ${i.message}`);
   return cached;
 }
